@@ -24,15 +24,22 @@ func New(store Store) *Idempo {
 	}
 }
 
-type statusRecorder struct {
+type responseRecorder struct {
 	http.ResponseWriter
 	statusCode int
+	body []byte
 }
 
-func (sr *statusRecorder) WriteHeader(code int) {
+func (sr *responseRecorder) WriteHeader(code int) {
 	sr.statusCode = code
 	sr.ResponseWriter.WriteHeader(code)
 }
+
+func (sr *responseRecorder) Write(body []byte) (int, error) {
+	sr.body = append(sr.body, body...)
+	return sr.ResponseWriter.Write(body)
+}
+
 
 // RFC 9457 compliant problem details
 type problemDetails struct {
@@ -52,7 +59,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		recorder := &statusRecorder{
+		recorder := &responseRecorder{
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
