@@ -1,8 +1,12 @@
 package idempo
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -27,7 +31,7 @@ func New(store Store) *Idempo {
 type responseRecorder struct {
 	http.ResponseWriter
 	statusCode int
-	body []byte
+	body       []byte
 }
 
 func (sr *responseRecorder) WriteHeader(code int) {
@@ -39,7 +43,6 @@ func (sr *responseRecorder) Write(body []byte) (int, error) {
 	sr.body = append(sr.body, body...)
 	return sr.ResponseWriter.Write(body)
 }
-
 
 // RFC 9457 compliant problem details
 type problemDetails struct {
@@ -83,6 +86,35 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 
 			return
 		}
+
+		body, err := io.ReadAll(r.Body)
+
+		if err != nil {
+			recorder.Header().Set("Content-Type", "application/problem+json")
+			recorder.WriteHeader(http.StatusInternalServerError)
+
+			pd := new(problemDetails)
+			pd.Type = "https://demo.com/errors/internal-server-error"
+			pd.Title = "Internal Server Error"
+			pd.Status = 500
+			pd.Detail = "Our server failed parsing the request body."
+			pd.Instance = r.URL.Path
+
+			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
+
+			if err != nil {
+				log.Print(err)
+			}
+
+			return
+		}
+
+		reader := bytes.NewReader(body)
+		r.Body = io.NopCloser(reader)
+
+		bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
+
+		log.Print(bodyHash)
 
 		next.ServeHTTP(recorder, r)
 	})
