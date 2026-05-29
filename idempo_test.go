@@ -1,6 +1,8 @@
 package idempo_test
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,7 +10,7 @@ import (
 	"github.com/eben-vranken/idempo"
 )
 
-func TestHandler(t *testing.T) {
+func TestUUIDv7IsValid(t *testing.T) {
 	cases := []struct {
 		name       string
 		key        string
@@ -85,4 +87,26 @@ func TestHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBodyIsRestoredAfterRead(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, jsonRequest) {
+			t.Errorf("Body returned = %08b, requested %08b", body, jsonRequest)
+		}
+	})
+
+	// TO-DO: Use a real store once Handler uses it.
+	m := idempo.New(nil)
+	handler := m.Handler(next)
+
+	handler.ServeHTTP(rec, req)
 }
