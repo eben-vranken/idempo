@@ -2,6 +2,7 @@ package inmem
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -58,6 +59,23 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 	}
 
 	return val.state, val.responseCode, val.responseBody, nil
+}
+
+func (ims *InMemStore) Complete(ctx context.Context, key string, statusCode int, body []byte) error {
+	ims.m.Lock()
+	defer ims.m.Unlock()
+
+	val, ok := ims.keys[key]
+
+	if !ok {
+		return errors.New("key was not found")
+	}
+
+	val.state = "completed"
+	val.responseCode = statusCode
+	val.responseBody = body
+
+	return nil
 }
 
 func New() *InMemStore {
