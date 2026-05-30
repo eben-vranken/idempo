@@ -186,3 +186,81 @@ func TestHandlerReplayResponseWithMismatchedBody(t *testing.T) {
 		t.Errorf("Code returned = %08b, extpected %08b", rec2.Code, 422)
 	}
 }
+
+func TestHandlerProcessesExpiredKeyAsFresh(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	var body []byte
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		w.Write(body)
+	})
+
+	m := idempo.New(inmem.New(1 * time.Millisecond))
+	handler := m.Handler(next)
+	handler.ServeHTTP(rec, req)
+
+	time.Sleep(time.Millisecond * 10)
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec2 := httptest.NewRecorder()
+
+	handler = m.Handler(next)
+	handler.ServeHTTP(rec2, req)
+
+	if rec2.Code != 201 {
+		t.Errorf("Code returned = %d, extpected %d", rec2.Code, 201)
+	}
+
+	if rec2.Header().Get("Idempotency-Replayed") == "true" {
+		t.Errorf("Idempotency Returned = %s, extpected %s", rec2.Header().Get("Idempotency-Replayed"), "false")
+	}
+}
+
+func TestHandlerReturnsConflictForInFlightRequest(t *testing.T) {
+	block := make(chan struct{})
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	var body []byte
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		w.Write(body)
+		<-block
+	})
+
+	m := idempo.New(inmem.New(24 * time.Hour))
+	handler := m.Handler(next)
+	go handler.ServeHTTP(rec, req)
+
+	time.Sleep(time.Millisecond * 10)
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec2 := httptest.NewRecorder()
+
+	handler = m.Handler(next)
+	handler.ServeHTTP(rec2, req)
+
+	if rec2.Code != 409 {
+		t.Errorf("Code returned = %d, extpected %d", rec2.Code, 409)
+	}
+
+	close(block)
+}
