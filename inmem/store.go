@@ -20,6 +20,11 @@ type InMemStore struct {
 	keys map[string]*Entry
 	m    sync.Mutex
 	ttl  time.Duration
+	done chan struct{}
+}
+
+func (ims *InMemStore) Close() {
+	close(ims.done)
 }
 
 func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string) (string, int, []byte, error) {
@@ -86,9 +91,35 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, statusCode int,
 }
 
 func New(expireDuration time.Duration) *InMemStore {
-	return &InMemStore{
-		keys: make(map[string]*Entry),
-		m:    sync.Mutex{},
-		ttl:  expireDuration,
+	ims := new(InMemStore)
+	ims.keys = make(map[string]*Entry)
+	ims.m = sync.Mutex{}
+	ims.ttl = expireDuration
+	ims.done = make(chan struct{})
+
+	ticker := time.NewTicker(60 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				clearExpiredKeys(ims)
+			case <-ims.done:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+
+	return ims
+}
+
+func clearExpiredKeys(ims *InMemStore) {
+	ims.m.Lock()
+	defer ims.m.Unlock()
+
+	for key, entry := range ims.keys {
+		if entry.expiryTime.Before(time.Now()) {
+			delete(ims.keys, key)
+		}
 	}
 }
