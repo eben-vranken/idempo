@@ -3,6 +3,7 @@ package inmem
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -52,6 +53,11 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 	// Key exists, state is pending
 	if val.state == "pending" {
 		return val.state, val.responseCode, nil, nil
+	}
+
+	// Key exists, body is different
+	if val.state == "completed" && val.bodyHash != requestHash {
+		return "conflict", http.StatusUnprocessableEntity, val.responseBody, nil
 	}
 
 	// Key exists, state is completed

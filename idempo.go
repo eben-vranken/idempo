@@ -136,6 +136,12 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
+		if status == "conflict" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			w.Write([]byte("422 - Unprocessable Entity"))
+			return
+		}
+
 		next.ServeHTTP(recorder, r)
 
 		err = m.store.Complete(r.Context(), idemKey, recorder.statusCode, recorder.body)
