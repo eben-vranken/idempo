@@ -2,20 +2,23 @@ package inmem_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/eben-vranken/idempo/inmem"
 )
 
-func TestInMemClaimValidKey(t *testing.T) {
+func TestInMemStoreOperations(t *testing.T) {
 	cases := []struct {
 		name        string
 		ctx         context.Context
 		key         string
 		requestHash string
+		wantBool    bool
 		err         error
 		status      string
+		claimed     bool
 		double      bool
 		completed   bool
 	}{
@@ -24,10 +27,36 @@ func TestInMemClaimValidKey(t *testing.T) {
 			ctx:         context.Background(),
 			key:         "019e7514-3f4e-7e25-b2cf-9d33b76340eb",
 			requestHash: "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f",
+			wantBool:    false,
 			err:         nil,
 			status:      "new",
+			claimed:     true,
 			double:      false,
 			completed:   false,
+		},
+		{
+			name:        "Claim and complete a new key",
+			ctx:         context.Background(),
+			key:         "019e7514-3f4e-7e25-b2cf-9d33b76340eb",
+			requestHash: "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f",
+			wantBool:    false,
+			err:         nil,
+			status:      "new",
+			claimed:     true,
+			double:      false,
+			completed:   true,
+		},
+		{
+			name:        "Complete an unclaimed key",
+			ctx:         context.Background(),
+			key:         "019e7514-3f4e-7e25-b2cf-9d33b76340eb",
+			requestHash: "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f",
+			wantBool:    true,
+			err:         errors.New("key was not found"),
+			status:      "",
+			claimed:     false,
+			double:      false,
+			completed:   true,
 		},
 	}
 
@@ -38,24 +67,28 @@ func TestInMemClaimValidKey(t *testing.T) {
 			var status string
 			var err error
 
-			status, _, _, err = store.Claim(tc.ctx, tc.key, tc.requestHash)
+			if tc.claimed {
+				status, _, _, err = store.Claim(tc.ctx, tc.key, tc.requestHash)
+			}
 
 			if tc.double {
 				status, _, _, err = store.Claim(tc.ctx, tc.key, tc.requestHash)
 			}
 
 			if tc.completed {
-				if status != tc.status {
-					t.Errorf("Status returned = %s, requested %s", status, tc.status)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Error returned = %s, requested %s", err, tc.err)
-				}
+				err = store.Complete(tc.ctx, tc.key, 200, []byte(""))
+			}
 
-				if status != tc.status {
-					t.Errorf("Status returned = %s, requested %s", status, tc.status)
-				}
+			if status != tc.status {
+				t.Errorf("Status returned = %s, requested %s", status, tc.status)
+			}
+
+			if err != nil && !tc.wantBool {
+				t.Errorf("Error returned = %s, requested %s", err, tc.err)
+			}
+
+			if status != tc.status {
+				t.Errorf("Status returned = %s, requested %s", status, tc.status)
 			}
 		})
 	}
