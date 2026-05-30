@@ -53,6 +53,16 @@ type problemDetails struct {
 	Instance string `json:"instance"`
 }
 
+func writeProblem(status int, problemType string, title string, detail string, instance string) problemDetails {
+	return problemDetails{
+		Status:   status,
+		Type:     problemType,
+		Title:    title,
+		Detail:   detail,
+		Instance: instance,
+	}
+}
+
 func (m *Idempo) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		idemKey := r.Header.Get("Idempotency-Key")
@@ -71,12 +81,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusBadRequest)
 
-			pd := new(problemDetails)
-			pd.Type = "https://demo.com/errors/bad-request"
-			pd.Title = "Invalid Idempotency Key"
-			pd.Status = 400
-			pd.Detail = "The Idempotency-Key header was provided but does not conform to the required UUIDv7 format."
-			pd.Instance = r.URL.Path
+			pd := writeProblem(400, "https://demo.com/errors/bad-request", "Invalid Idempotency Key", "The Idempotency-Key header was provided but does not conform to the required UUIDv7 format.", r.URL.Path)
 
 			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
 
@@ -93,12 +98,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusInternalServerError)
 
-			pd := new(problemDetails)
-			pd.Type = "https://demo.com/errors/internal-server-error"
-			pd.Title = "Internal Server Error"
-			pd.Status = 500
-			pd.Detail = "Our server failed parsing the request body."
-			pd.Instance = r.URL.Path
+			pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
 
 			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
 
@@ -117,28 +117,54 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		status, savedCode, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash)
 
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("500 - Internal server error"))
+			recorder.Header().Set("Content-Type", "application/problem+json")
+			recorder.WriteHeader(http.StatusInternalServerError)
+
+			pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
+
+			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
+
+			if err != nil {
+				log.Print(err)
+			}
+
 			return
 		}
 
 		if status == "completed" {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Idempotency-Replayed", "true")
-			w.WriteHeader(savedCode)
-			w.Write(savedBody)
+			recorder.Header().Set("Content-Type", "application/json")
+			recorder.Header().Set("Idempotency-Replayed", "true")
+			recorder.WriteHeader(savedCode)
+			recorder.Write(savedBody)
 			return
 		}
 
 		if status == "pending" {
-			w.WriteHeader(http.StatusConflict)
-			w.Write([]byte("409 - Conflict"))
+			recorder.Header().Set("Content-Type", "application/problem+json")
+			recorder.WriteHeader(http.StatusConflict)
+
+			pd := writeProblem(409, "https://demo.com/errors/conflict", "Status Conflict", "Another request is already handing this request.", r.URL.Path)
+
+			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
+
+			if err != nil {
+				log.Print(err)
+			}
 			return
 		}
 
 		if status == "conflict" {
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			w.Write([]byte("422 - Unprocessable Entity"))
+			recorder.Header().Set("Content-Type", "application/problem+json")
+			recorder.WriteHeader(http.StatusUnprocessableEntity)
+
+			pd := writeProblem(422, "https://demo.com/errors/body-mismatch", "Unprocessable Entity", "A request with this key but different body has hit this server already.", r.URL.Path)
+
+			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
+
+			if err != nil {
+				log.Print(err)
+			}
+
 			return
 		}
 
