@@ -18,6 +18,7 @@ type Entry struct {
 type InMemStore struct {
 	keys map[string]*Entry
 	m    sync.Mutex
+	ttl  time.Duration
 }
 
 func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string) (string, int, []byte, error) {
@@ -31,7 +32,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 		ims.keys[key] = &Entry{
 			bodyHash:   requestHash,
 			state:      "pending",
-			expiryTime: time.Now().Add(time.Hour * 24),
+			expiryTime: time.Now().Add(ims.ttl),
 		}
 
 		return "new", 0, nil, nil
@@ -42,7 +43,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 		ims.keys[key] = &Entry{
 			bodyHash:   requestHash,
 			state:      "pending",
-			expiryTime: time.Now().Add(time.Hour * 24),
+			expiryTime: time.Now().Add(ims.ttl),
 		}
 
 		return "new", 0, nil, nil
@@ -78,9 +79,10 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, statusCode int,
 	return nil
 }
 
-func New() *InMemStore {
+func New(expireDuration time.Duration) *InMemStore {
 	return &InMemStore{
 		keys: make(map[string]*Entry),
 		m:    sync.Mutex{},
+		ttl:  expireDuration,
 	}
 }
