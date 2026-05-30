@@ -114,9 +114,35 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 
 		bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
 
-		log.Print(bodyHash)
+		status, savedCode, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("500 - Internal server error"))
+			return
+		}
+
+		if status == "completed" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Idempotency-Replayed", "true")
+			w.WriteHeader(savedCode)
+			w.Write(savedBody)
+			return
+		}
+
+		if status == "pending" {
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte("409 - Conflict"))
+			return
+		}
 
 		next.ServeHTTP(recorder, r)
+
+		err = m.store.Complete(r.Context(), idemKey, recorder.statusCode, recorder.body)
+
+		if err != nil {
+			log.Print(err)
+		}
 	})
 }
 

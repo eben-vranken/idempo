@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/eben-vranken/idempo"
+	"github.com/eben-vranken/idempo/inmem"
 )
 
 func TestUUIDv7IsValid(t *testing.T) {
@@ -68,8 +70,7 @@ func TestUUIDv7IsValid(t *testing.T) {
 				called = true
 			})
 
-			// TO-DO: Use a real store once Handler uses it.
-			m := idempo.New(nil)
+			m := idempo.New(inmem.New(24 * time.Hour))
 			handler := m.Handler(next)
 
 			req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -104,8 +105,7 @@ func TestBodyIsRestoredAfterRead(t *testing.T) {
 		}
 	})
 
-	// TO-DO: Use a real store once Handler uses it.
-	m := idempo.New(nil)
+	m := idempo.New(inmem.New(24 * time.Hour))
 	handler := m.Handler(next)
 
 	handler.ServeHTTP(rec, req)
