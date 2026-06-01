@@ -15,6 +15,16 @@ type PostgresStore struct {
 	pool         *pgxpool.Pool
 	lockTTL      time.Duration
 	retentionTTL time.Duration
+	done         chan struct{}
+}
+
+func (pgs *PostgresStore) Close() {
+	close(pgs.done)
+}
+
+func (pgs *PostgresStore) Sweep(ctx context.Context) error {
+	_, err := pgs.pool.Exec(ctx, "DELETE FROM pgStore WHERE expiryTime < now()")
+	return err
 }
 
 type Entry struct {
@@ -99,10 +109,23 @@ func New(connStr string, lockTTL time.Duration, retentionTTL time.Duration) (*Po
 	if err != nil {
 		return nil, err
 	}
-
 	pgs.pool = pool
 	pgs.lockTTL = lockTTL
 	pgs.retentionTTL = retentionTTL
+
+	pgs.done = make(chan struct{})
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				pgs.Sweep(context.Background())
+			case <-pgs.done:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
 
 	return pgs, nil
 }
@@ -125,7 +148,10 @@ func RunMigration(connStr string) error {
 		responseHeaders BYTEA NULL,
 		responseBody BYTEA NULL,
 		expiryTime TIMESTAMPTZ NOT NULL
-	);`)
+	);
+	
+	CREATE INDEX IF NOT EXISTS idx_pgstore_expiry ON pgStore (expiryTime);
+	`)
 
 	return err
 }

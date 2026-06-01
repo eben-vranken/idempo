@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/eben-vranken/idempo/pg"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 func TestClaimNewKey(t *testing.T) {
-	store := newTestStore(t, time.Hour*24, time.Minute*5)
+	store, _ := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -24,7 +25,7 @@ func TestClaimNewKey(t *testing.T) {
 }
 
 func TestClaimReturnsPending(t *testing.T) {
-	store := newTestStore(t, time.Hour*24, time.Minute*5)
+	store, _ := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -39,7 +40,7 @@ func TestClaimReturnsPending(t *testing.T) {
 }
 
 func TestClaimCompletedKey(t *testing.T) {
-	store := newTestStore(t, time.Hour*24, time.Minute*5)
+	store, _ := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -75,7 +76,7 @@ func TestClaimCompletedKey(t *testing.T) {
 }
 
 func TestClaimConflictedKey(t *testing.T) {
-	store := newTestStore(t, time.Hour*24, time.Minute*5)
+	store, _ := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -97,7 +98,7 @@ func TestClaimConflictedKey(t *testing.T) {
 }
 
 func TestExpiredTTL(t *testing.T) {
-	store := newTestStore(t, time.Millisecond, time.Millisecond)
+	store, _ := newTestStore(t, time.Millisecond, time.Millisecond)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -113,7 +114,46 @@ func TestExpiredTTL(t *testing.T) {
 	}
 }
 
-func newTestStore(t *testing.T, lockTTL time.Duration, retentionTTL time.Duration) *pg.PostgresStore {
+func TestSweepDeletesExpired(t *testing.T) {
+	// Long lock so the claim doesn't expire before Complete; tiny retention
+	// so the completed row is sweepable almost immediately.
+	store, connString := newTestStore(t, time.Minute, time.Millisecond)
+
+	ctx := context.Background()
+	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
+	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
+
+	_, _, _, _, _ = store.Claim(ctx, key, requestHash, "token")
+
+	if err := store.Complete(ctx, key, "token", 200, []byte("{}"), []byte("body")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Let the completed row's retention window lapse.
+	time.Sleep(10 * time.Millisecond)
+
+	if err := store.Sweep(ctx); err != nil {
+		t.Fatalf("Sweep returned error: %v", err)
+	}
+
+	// Verify the row was actually deleted, not merely lazily reset by a Claim.
+	pool, err := pgxpool.New(ctx, connString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM pgStore WHERE idempoKey = $1", key).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 0 {
+		t.Errorf("Row count after Sweep = %d, expected 0", count)
+	}
+}
+
+func newTestStore(t *testing.T, lockTTL time.Duration, retentionTTL time.Duration) (*pg.PostgresStore, string) {
 	ctx := context.Background()
 	container, err := postgres.Run(ctx, "postgres:18", postgres.BasicWaitStrategies())
 
@@ -139,7 +179,9 @@ func newTestStore(t *testing.T, lockTTL time.Duration, retentionTTL time.Duratio
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() { container.Terminate(ctx) })
-
-	return pgs
+	t.Cleanup(func() {
+		pgs.Close()
+		container.Terminate(ctx)
+	})
+	return pgs, connString
 }

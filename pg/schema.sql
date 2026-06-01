@@ -6,5 +6,7 @@ CREATE TABLE IF NOT EXISTS pgStore (
     responseCode INT NULL,
     responseHeaders BYTEA NULL,
     responseBody BYTEA NULL,
-    expiryTime TIMESTAMPTZ NOT NULL
+    expiryTime TIMESTAMPTZ NOT NULL,
 );
+
+CREATE INDEX IF NOT EXISTS idx_pgstore_expiry ON pgStore (expiryTime);
