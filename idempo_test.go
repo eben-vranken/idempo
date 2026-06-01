@@ -143,7 +143,7 @@ func TestHandlerReplayResponse(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 201 {
-		t.Errorf("Code returned = %08b, expected %08b", rec2.Code, 201)
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 201)
 	}
 
 	if rec2.Body.String() != string(body) {
@@ -288,7 +288,7 @@ func TestHandlerReplayResponseWithMismatchedBody(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 422 {
-		t.Errorf("Code returned = %08b, expected %08b", rec2.Code, 422)
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 422)
 	}
 }
 
@@ -501,7 +501,7 @@ func TestHandlerPersistsAfterSlowHandler(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 201 {
-		t.Errorf("Code returned = %08b, expected %08b", rec2.Code, 201)
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 201)
 	}
 
 	if rec2.Body.String() != string(body) {
@@ -522,5 +522,44 @@ func TestHandlerPersistsAfterSlowHandler(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("Count returned = %d, expected %d", count, 2)
+	}
+}
+
+func TestHandlerSameKeyDifferentPathConflicts(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/charges", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	var body []byte
+
+	count := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		w.Write(body)
+	})
+
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
+	handler := m.Handler(next)
+	handler.ServeHTTP(rec, req)
+
+	req = httptest.NewRequest(http.MethodPost, "/refunds", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec2 := httptest.NewRecorder()
+
+	handler = m.Handler(next)
+	handler.ServeHTTP(rec2, req)
+
+	if rec2.Code != 422 {
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 422)
+	}
+
+	if count != 1 {
+		t.Errorf("Count returned = %d, expected %d", count, 1)
 	}
 }
