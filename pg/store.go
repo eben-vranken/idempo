@@ -34,7 +34,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 	) VALUES (
 	$1, $2, $3, $4
 	) ON CONFLICT (idempoKey) DO NOTHING
-	RETURNING state`, key, "new", bodyHash, time.Now().Add(pgs.ttl))
+	RETURNING state`, key, "pending", bodyHash, time.Now().Add(pgs.ttl))
 
 	err := row.Scan(&state)
 
@@ -60,7 +60,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 					responseBody = NULL,
 					expiryTime = $3
 				WHERE idempoKey = $1
-			`, key, "new", time.Now().Add(pgs.ttl))
+			`, key, "pending", time.Now().Add(pgs.ttl))
 
 			if err != nil {
 				return "", 0, nil, err
@@ -94,7 +94,7 @@ func (pgs *PostgresStore) Complete(ctx context.Context, key string, statusCode i
 	return err
 }
 
-func New(connStr string) (*PostgresStore, error) {
+func New(connStr string, expireDuration time.Duration) (*PostgresStore, error) {
 	pgs := new(PostgresStore)
 	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
@@ -102,7 +102,7 @@ func New(connStr string) (*PostgresStore, error) {
 	}
 
 	pgs.pool = pool
-	pgs.ttl = time.Hour * 24
+	pgs.ttl = expireDuration
 
 	return pgs, nil
 }

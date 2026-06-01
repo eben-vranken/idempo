@@ -1,15 +1,17 @@
 package pg_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/eben-vranken/idempo/pg"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 func TestClaimNewKey(t *testing.T) {
-	store := newTestStore(t)
+	store := newTestStore(t, time.Hour*24)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -21,7 +23,91 @@ func TestClaimNewKey(t *testing.T) {
 	}
 }
 
-func newTestStore(t *testing.T) *pg.PostgresStore {
+func TestClaimReturnsPending(t *testing.T) {
+	store := newTestStore(t, time.Hour*24)
+
+	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
+	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
+
+	_, _, _, _ = store.Claim(context.Background(), key, requestHash)
+
+	status, _, _, _ := store.Claim(context.Background(), key, requestHash)
+
+	if status != "pending" {
+		t.Errorf("Status returned = %s, requested %s", status, "pending")
+	}
+}
+
+func TestClaimCompletedKey(t *testing.T) {
+	store := newTestStore(t, time.Hour*24)
+
+	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
+	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
+
+	_, _, _, _ = store.Claim(context.Background(), key, requestHash)
+
+	wantBody := []byte(`{"ok": "true"}`)
+	err := store.Complete(context.Background(), key, 201, wantBody)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, statusCode, savedBody, _ := store.Claim(context.Background(), key, requestHash)
+
+	if status != "completed" {
+		t.Errorf("Status returned = %s, requested %s", status, "completed")
+	}
+
+	if statusCode != 201 {
+		t.Errorf("Status code returned = %d, requested %d", statusCode, 201)
+	}
+
+	if !bytes.Equal(savedBody, wantBody) {
+		t.Errorf("Respone body returned = %s, requested %s", savedBody, wantBody)
+	}
+}
+
+func TestClaimConflictedKey(t *testing.T) {
+	store := newTestStore(t, time.Hour*24)
+
+	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
+	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
+
+	_, statusCode, savedBody, _ := store.Claim(context.Background(), key, requestHash)
+
+	err := store.Complete(context.Background(), key, statusCode, savedBody)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	differentRequestHash := "81fd8e12b33d548c41873494bb73c2c6b841b157ce0860857e70f41af9f24337"
+	status, _, _, _ := store.Claim(context.Background(), key, differentRequestHash)
+
+	if status != "conflict" {
+		t.Errorf("Status returned = %s, requested %s", status, "conflict")
+	}
+}
+
+func TestExpiredTTL(t *testing.T) {
+	store := newTestStore(t, time.Millisecond)
+
+	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
+	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
+
+	_, _, _, _ = store.Claim(context.Background(), key, requestHash)
+
+	time.Sleep(10 * time.Millisecond)
+
+	status, _, _, _ := store.Claim(context.Background(), key, requestHash)
+
+	if status != "new" {
+		t.Errorf("Status returned = %s, requested %s", status, "new")
+	}
+}
+
+func newTestStore(t *testing.T, expireDuration time.Duration) *pg.PostgresStore {
 	ctx := context.Background()
 	container, err := postgres.Run(ctx, "postgres:18", postgres.BasicWaitStrategies())
 
@@ -35,7 +121,7 @@ func newTestStore(t *testing.T) *pg.PostgresStore {
 		t.Fatal(err)
 	}
 
-	pgs, err := pg.New(connString)
+	pgs, err := pg.New(connString, expireDuration)
 
 	if err != nil {
 		t.Fatal(err)
