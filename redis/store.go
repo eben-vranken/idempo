@@ -56,12 +56,13 @@ var abandonScript = `
 `
 
 type RedisStore struct {
-	client *goredis.Client
-	ttl    time.Duration
+	client       *goredis.Client
+	lockTTL      time.Duration
+	retentionTTL time.Duration
 }
 
 func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedHeaders []byte, savedBody []byte, err error) {
-	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, int(rs.ttl.Seconds()), token).Result()
+	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, int(rs.lockTTL.Seconds()), token).Result()
 
 	if err != nil {
 		return "", 0, nil, nil, err
@@ -86,7 +87,7 @@ func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string,
 }
 
 func (rs *RedisStore) Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error {
-	_, err := rs.client.Eval(ctx, completeScript, []string{key}, token, statusCode, headers, body, int(rs.ttl.Seconds())).Result()
+	_, err := rs.client.Eval(ctx, completeScript, []string{key}, token, statusCode, headers, body, int(rs.retentionTTL.Seconds())).Result()
 
 	if err != nil {
 		return err
@@ -105,9 +106,10 @@ func (rs *RedisStore) Abandon(ctx context.Context, key string, token string) err
 	return nil
 }
 
-func New(opt *goredis.Options, expireDuration time.Duration) *RedisStore {
+func New(opt *goredis.Options, lockTTL time.Duration, retentionTTL time.Duration) *RedisStore {
 	return &RedisStore{
-		client: goredis.NewClient(opt),
-		ttl:    expireDuration,
+		client:       goredis.NewClient(opt),
+		lockTTL:      lockTTL,
+		retentionTTL: retentionTTL,
 	}
 }

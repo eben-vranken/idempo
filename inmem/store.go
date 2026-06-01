@@ -23,10 +23,11 @@ type Entry struct {
 }
 
 type InMemStore struct {
-	keys map[string]*Entry
-	m    sync.Mutex
-	ttl  time.Duration
-	done chan struct{}
+	keys         map[string]*Entry
+	m            sync.Mutex
+	lockTTL      time.Duration
+	retentionTTL time.Duration
+	done         chan struct{}
 }
 
 func (ims *InMemStore) Close() {
@@ -45,7 +46,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 			token:      token,
 			bodyHash:   requestHash,
 			state:      "pending",
-			expiryTime: time.Now().Add(ims.ttl),
+			expiryTime: time.Now().Add(ims.lockTTL),
 		}
 
 		return "new", 0, nil, nil, nil
@@ -57,7 +58,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 			token:      token,
 			bodyHash:   requestHash,
 			state:      "pending",
-			expiryTime: time.Now().Add(ims.ttl),
+			expiryTime: time.Now().Add(ims.lockTTL),
 		}
 
 		return "new", 0, nil, nil, nil
@@ -99,6 +100,7 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, token string, s
 	val.responseCode = statusCode
 	val.responseHeaders = header
 	val.responseBody = body
+	val.expiryTime = time.Now().Add(ims.retentionTTL)
 
 	return nil
 }
@@ -122,11 +124,12 @@ func (ims *InMemStore) Abandon(ctx context.Context, key string, token string) er
 	return nil
 }
 
-func New(expireDuration time.Duration) *InMemStore {
+func New(lockTTL time.Duration, retentionTTL time.Duration) *InMemStore {
 	ims := new(InMemStore)
 	ims.keys = make(map[string]*Entry)
 	ims.m = sync.Mutex{}
-	ims.ttl = expireDuration
+	ims.lockTTL = lockTTL
+	ims.retentionTTL = retentionTTL
 	ims.done = make(chan struct{})
 
 	ticker := time.NewTicker(60 * time.Second)

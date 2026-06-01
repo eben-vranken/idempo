@@ -12,8 +12,9 @@ import (
 var _ idempo.Store = (*PostgresStore)(nil)
 
 type PostgresStore struct {
-	pool *pgxpool.Pool
-	ttl  time.Duration
+	pool         *pgxpool.Pool
+	lockTTL      time.Duration
+	retentionTTL time.Duration
 }
 
 type Entry struct {
@@ -38,7 +39,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 	)
 	ON CONFLICT (idempoKey) DO UPDATE 
 	SET state = 'pending', token = EXCLUDED.token, bodyHash = EXCLUDED.bodyHash, responseCode = NULL, responseHeaders = NULL, responseBody = NULL, expiryTime = EXCLUDED.expiryTime
-	WHERE pgStore.expiryTime < now() RETURNING state`, key, token, bodyHash, time.Now().Add(pgs.ttl))
+	WHERE pgStore.expiryTime < now() RETURNING state`, key, token, bodyHash, time.Now().Add(pgs.lockTTL))
 
 	err := row.Scan(&state)
 
@@ -75,9 +76,10 @@ func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string
 					state = $2,
 					responseCode = $3,
 					responseHeaders = $4,
-					responseBody = $5
+					responseBody = $5,
+					expiryTime = $7
 				WHERE idempoKey = $1 AND token = $6 AND state = 'pending'
-			`, key, "completed", statusCode, headers, body, token)
+			`, key, "completed", statusCode, headers, body, token, time.Now().Add(pgs.retentionTTL))
 
 	return err
 }
@@ -91,7 +93,7 @@ func (pgs *PostgresStore) Abandon(ctx context.Context, key string, token string)
 	return err
 }
 
-func New(connStr string, expireDuration time.Duration) (*PostgresStore, error) {
+func New(connStr string, lockTTL time.Duration, retentionTTL time.Duration) (*PostgresStore, error) {
 	pgs := new(PostgresStore)
 	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
@@ -99,7 +101,8 @@ func New(connStr string, expireDuration time.Duration) (*PostgresStore, error) {
 	}
 
 	pgs.pool = pool
-	pgs.ttl = expireDuration
+	pgs.lockTTL = lockTTL
+	pgs.retentionTTL = retentionTTL
 
 	return pgs, nil
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestClaimNewKey(t *testing.T) {
-	store := newTestStore(t, time.Hour*24)
+	store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -24,7 +24,7 @@ func TestClaimNewKey(t *testing.T) {
 }
 
 func TestClaimReturnsPending(t *testing.T) {
-	store := newTestStore(t, time.Hour*24)
+	store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -39,7 +39,7 @@ func TestClaimReturnsPending(t *testing.T) {
 }
 
 func TestClaimCompletedKey(t *testing.T) {
-	store := newTestStore(t, time.Hour*24)
+	store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -75,7 +75,7 @@ func TestClaimCompletedKey(t *testing.T) {
 }
 
 func TestClaimConflictedKey(t *testing.T) {
-	store := newTestStore(t, time.Hour*24)
+	store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -97,7 +97,7 @@ func TestClaimConflictedKey(t *testing.T) {
 }
 
 func TestExpiredTTL(t *testing.T) {
-	store := newTestStore(t, time.Millisecond)
+	store := newTestStore(t, time.Millisecond, time.Millisecond)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -113,7 +113,7 @@ func TestExpiredTTL(t *testing.T) {
 	}
 }
 
-func newTestStore(t *testing.T, expireDuration time.Duration) *pg.PostgresStore {
+func newTestStore(t *testing.T, lockTTL time.Duration, retentionTTL time.Duration) *pg.PostgresStore {
 	ctx := context.Background()
 	container, err := postgres.Run(ctx, "postgres:18", postgres.BasicWaitStrategies())
 
@@ -127,7 +127,7 @@ func newTestStore(t *testing.T, expireDuration time.Duration) *pg.PostgresStore 
 		t.Fatal(err)
 	}
 
-	pgs, err := pg.New(connString, expireDuration)
+	pgs, err := pg.New(connString, lockTTL, retentionTTL)
 
 	if err != nil {
 		t.Fatal(err)

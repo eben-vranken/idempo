@@ -70,7 +70,7 @@ func TestUUIDv7IsValid(t *testing.T) {
 				called = true
 			})
 
-			m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+			m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 			handler := m.Handler(next)
 
 			req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -105,7 +105,7 @@ func TestBodyIsRestoredAfterRead(t *testing.T) {
 		}
 	})
 
-	m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 	handler := m.Handler(next)
 
 	handler.ServeHTTP(rec, req)
@@ -129,7 +129,7 @@ func TestHandlerReplayResponse(t *testing.T) {
 		w.Write(body)
 	})
 
-	m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 	handler := m.Handler(next)
 	handler.ServeHTTP(rec, req)
 
@@ -178,7 +178,7 @@ func TestHandlerReplayResponseWithMismatchedBody(t *testing.T) {
 		w.Write(body)
 	})
 
-	m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 	handler := m.Handler(next)
 	handler.ServeHTTP(rec, req)
 
@@ -213,7 +213,7 @@ func TestHandlerProcessesExpiredKeyAsFresh(t *testing.T) {
 		w.Write(body)
 	})
 
-	m := idempo.New(inmem.New(1*time.Millisecond), idempo.Options{})
+	m := idempo.New(inmem.New(1*time.Millisecond, 5*time.Millisecond), idempo.Options{})
 	handler := m.Handler(next)
 	handler.ServeHTTP(rec, req)
 
@@ -254,7 +254,7 @@ func TestHandlerReturnsConflictForInFlightRequest(t *testing.T) {
 		<-block
 	})
 
-	m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 	handler := m.Handler(next)
 	go handler.ServeHTTP(rec, req)
 
@@ -293,7 +293,7 @@ func TestHandler5xxReleasesClaim(t *testing.T) {
 		w.Write(body)
 	})
 
-	m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 	handler := m.Handler(next)
 	handler.ServeHTTP(rec, req)
 
@@ -339,7 +339,7 @@ func TestHandlerPanicReleaseClaim(t *testing.T) {
 		w.Write(body)
 	})
 
-	m := idempo.New(inmem.New(24*time.Hour), idempo.Options{})
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
 	handler := m.Handler(next)
 
 	func() {

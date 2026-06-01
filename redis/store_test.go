@@ -66,9 +66,9 @@ func TestClaimCompletedKey(t *testing.T) {
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
-	
+
 	_, _, _, _, _ = store.Claim(context.Background(), key, requestHash, "token")
-	
+
 	wantBody := []byte(`{"ok": "true"}`)
 	headerBytes := []byte(`{"Content-Type":["text/plain"]}`)
 	err := store.Complete(context.Background(), key, "token", 201, headerBytes, wantBody)
@@ -122,5 +122,5 @@ func newTestStore(t *testing.T) (*miniredis.Miniredis, *redis.RedisStore) {
 
 	t.Cleanup(func() { mr.Close() })
 
-	return mr, redis.New(&goredis.Options{Addr: mr.Addr()}, 24*time.Hour)
+	return mr, redis.New(&goredis.Options{Addr: mr.Addr()}, 24*time.Hour, 5*time.Minute)
 }
