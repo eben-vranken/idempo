@@ -106,3 +106,24 @@ func New(connStr string) (*PostgresStore, error) {
 
 	return pgs, nil
 }
+
+func RunMigration(connStr string) error {
+	pool, err := pgxpool.New(context.Background(), connStr)
+
+	if err != nil {
+		return err
+	}
+
+	defer pool.Close()
+
+	_, err = pool.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS pgStore (
+		idempoKey VARCHAR(255) NOT NULL PRIMARY KEY,
+		state VARCHAR(20) NOT NULL,
+		bodyHash VARCHAR(255) NULL,
+		responseCode INT NULL,
+		responseBody BYTEA NULL,
+		expiryTime TIMESTAMPTZ NOT NULL
+	);`)
+
+	return err
+}
