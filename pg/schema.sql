@@ -1,6 +1,7 @@
-CREATE TABLE IF NOT EXISTS "pgStore" (
+CREATE TABLE IF NOT EXISTS pgStore (
     idempoKey VARCHAR(255) NOT NULL PRIMARY KEY,
     state VARCHAR(20) NOT NULL,
+    token VARCHAR(255) NOT NULL,
     bodyHash VARCHAR(255) NULL,
     responseCode INT NULL,
     responseBody BYTEA NULL,

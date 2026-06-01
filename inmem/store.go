@@ -13,6 +13,7 @@ import (
 var _ idempo.Store = (*InMemStore)(nil)
 
 type Entry struct {
+	token        string
 	bodyHash     string
 	state        string
 	responseCode int
@@ -31,7 +32,7 @@ func (ims *InMemStore) Close() {
 	close(ims.done)
 }
 
-func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string) (string, int, []byte, error) {
+func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (string, int, []byte, error) {
 	ims.m.Lock()
 	defer ims.m.Unlock()
 
@@ -40,6 +41,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 	// Claim new key
 	if !ok {
 		ims.keys[key] = &Entry{
+			token:      token,
 			bodyHash:   requestHash,
 			state:      "pending",
 			expiryTime: time.Now().Add(ims.ttl),
@@ -51,6 +53,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 	// Key exists but expired
 	if val.expiryTime.Before(time.Now()) {
 		ims.keys[key] = &Entry{
+			token:      token,
 			bodyHash:   requestHash,
 			state:      "pending",
 			expiryTime: time.Now().Add(ims.ttl),
@@ -77,7 +80,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 	return val.state, val.responseCode, val.responseBody, nil
 }
 
-func (ims *InMemStore) Complete(ctx context.Context, key string, statusCode int, body []byte) error {
+func (ims *InMemStore) Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error {
 	ims.m.Lock()
 	defer ims.m.Unlock()
 
@@ -85,6 +88,10 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, statusCode int,
 
 	if !ok {
 		return errors.New("key was not found")
+	}
+
+	if val.token != token {
+		return nil
 	}
 
 	val.state = "completed"

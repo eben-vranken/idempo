@@ -24,19 +24,20 @@ type Entry struct {
 	expiryTime   time.Time
 }
 
-func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string) (string, int, []byte, error) {
+func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (string, int, []byte, error) {
 	var state string
 	row := pgs.pool.QueryRow(ctx, `INSERT INTO pgStore (
 		idempoKey,
 		state,
+		token,
 		bodyHash,
 		expiryTime
 	) VALUES (
-	$1, 'pending', $2, $3
+	$1, 'pending', $2, $3, $4
 	)
 	ON CONFLICT (idempoKey) DO UPDATE 
-	SET state = 'pending', bodyHash = EXCLUDED.bodyHash, responseCode = NULL, responseBody = NULL, expiryTime = EXCLUDED.expiryTime
-	WHERE pgStore.expiryTime < now() RETURNING state`, key, bodyHash, time.Now().Add(pgs.ttl))
+	SET state = 'pending', token = EXCLUDED.token, bodyHash = EXCLUDED.bodyHash, responseCode = NULL, responseBody = NULL, expiryTime = EXCLUDED.expiryTime
+	WHERE pgStore.expiryTime < now() RETURNING state`, key, token, bodyHash, time.Now().Add(pgs.ttl))
 
 	err := row.Scan(&state)
 
@@ -66,15 +67,15 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 	return "new", 0, nil, nil
 }
 
-func (pgs *PostgresStore) Complete(ctx context.Context, key string, statusCode int, body []byte) error {
+func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error {
 	_, err := pgs.pool.Exec(ctx, `
 				UPDATE pgStore
 				SET
 					state = $2,
 					responseCode = $3,
 					responseBody = $4
-				WHERE idempoKey = $1
-			`, key, "completed", statusCode, body)
+				WHERE idempoKey = $1 AND token = $5 AND state = 'pending'
+			`, key, "completed", statusCode, body, token)
 
 	return err
 }
@@ -104,6 +105,7 @@ func RunMigration(connStr string) error {
 	_, err = pool.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS pgStore (
 		idempoKey VARCHAR(255) NOT NULL PRIMARY KEY,
 		state VARCHAR(20) NOT NULL,
+		token VARCHAR(255) NOT NULL,
 		bodyHash VARCHAR(255) NULL,
 		responseCode INT NULL,
 		responseBody BYTEA NULL,

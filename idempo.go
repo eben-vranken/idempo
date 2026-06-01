@@ -10,12 +10,13 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"github.com/google/uuid"
 )
 
 type Store interface {
-	Claim(ctx context.Context, key string, requestHash string) (status string, savedCode int, savedBody []byte, err error)
+	Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedBody []byte, err error)
 
-	Complete(ctx context.Context, key string, statusCode int, body []byte) error
+	Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error
 }
 
 type Idempo struct {
@@ -113,8 +114,9 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(reader)
 
 		bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
-
-		status, savedCode, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash)
+		
+		token := uuid.NewString()
+		status, savedCode, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
 		if err != nil {
 			recorder.Header().Set("Content-Type", "application/problem+json")
@@ -170,7 +172,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 
 		next.ServeHTTP(recorder, r)
 
-		err = m.store.Complete(r.Context(), idemKey, recorder.statusCode, recorder.body)
+		err = m.store.Complete(r.Context(), idemKey, token, recorder.statusCode, recorder.body)
 
 		if err != nil {
 			log.Print(err)
