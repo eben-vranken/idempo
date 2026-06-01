@@ -123,6 +123,8 @@ func TestHandlerReplayResponse(t *testing.T) {
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("X-Custom", "42")
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusCreated)
 		w.Write(body)
 	})
@@ -140,15 +142,23 @@ func TestHandlerReplayResponse(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 201 {
-		t.Errorf("Code returned = %08b, extpected %08b", rec2.Code, 201)
+		t.Errorf("Code returned = %08b, expected %08b", rec2.Code, 201)
 	}
 
 	if rec2.Body.String() != string(body) {
-		t.Errorf("Body returned = %s, extpected %s", rec2.Body.String(), `{order_id:123, "status": "created"}`)
+		t.Errorf("Body returned = %s, expected %s", rec2.Body.String(), `{order_id:123, "status": "created"}`)
 	}
 
 	if rec2.Header().Get("Idempotency-Replayed") != "true" {
-		t.Errorf("Idempotency Returned = %s, extpected %s", rec2.Header().Get("Idempotency-Replayed"), "true")
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Idempotency-Replayed"), "true")
+	}
+
+	if rec2.Header().Get("X-Custom") != "42" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("X-Custom"), "42")
+	}
+
+	if rec2.Header().Get("Content-Type") != "text/plain" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Content-Type"), "text/plain")
 	}
 }
 
@@ -183,7 +193,7 @@ func TestHandlerReplayResponseWithMismatchedBody(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 422 {
-		t.Errorf("Code returned = %08b, extpected %08b", rec2.Code, 422)
+		t.Errorf("Code returned = %08b, expected %08b", rec2.Code, 422)
 	}
 }
 
@@ -218,11 +228,11 @@ func TestHandlerProcessesExpiredKeyAsFresh(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 201 {
-		t.Errorf("Code returned = %d, extpected %d", rec2.Code, 201)
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 201)
 	}
 
 	if rec2.Header().Get("Idempotency-Replayed") == "true" {
-		t.Errorf("Idempotency Returned = %s, extpected %s", rec2.Header().Get("Idempotency-Replayed"), "false")
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Idempotency-Replayed"), "false")
 	}
 }
 
@@ -259,8 +269,105 @@ func TestHandlerReturnsConflictForInFlightRequest(t *testing.T) {
 	handler.ServeHTTP(rec2, req)
 
 	if rec2.Code != 409 {
-		t.Errorf("Code returned = %d, extpected %d", rec2.Code, 409)
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 409)
 	}
 
 	close(block)
+}
+
+func TestHandler5xxReleasesClaim(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	var body []byte
+	count := 0
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write(body)
+	})
+
+	m := idempo.New(inmem.New(24 * time.Hour))
+	handler := m.Handler(next)
+	handler.ServeHTTP(rec, req)
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec2 := httptest.NewRecorder()
+
+	handler = m.Handler(next)
+	handler.ServeHTTP(rec2, req)
+
+	if rec2.Code != 500 {
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 500)
+	}
+
+	if count != 2 {
+		t.Errorf("Count returned = %d, expected %d", count, 2)
+	}
+
+	if rec2.Header().Get("Idempotency-Replayed") == "true" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Idempotency-Replayed"), "false")
+	}
+}
+
+func TestHandlerPanicReleaseClaim(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	var body []byte
+	count := 0
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		if count == 1 {
+			panic("boom")
+		}
+		body, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	})
+
+	m := idempo.New(inmem.New(24 * time.Hour))
+	handler := m.Handler(next)
+
+	func() {
+		defer func() {
+			if rec := recover(); rec == nil {
+				t.Error("expected panic to propagate, got none")
+			}
+		}()
+		handler.ServeHTTP(rec, req)
+	}()
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec2 := httptest.NewRecorder()
+
+	handler = m.Handler(next)
+	handler.ServeHTTP(rec2, req)
+
+	if rec2.Code != 200 {
+		t.Errorf("Code returned = %d, expected %d", rec2.Code, 200)
+	}
+
+	if count != 2 {
+		t.Errorf("Count returned = %d, expected %d", count, 2)
+	}
+
+	if rec2.Header().Get("Idempotency-Replayed") == "true" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Idempotency-Replayed"), "false")
+	}
 }

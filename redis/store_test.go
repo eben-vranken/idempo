@@ -66,17 +66,18 @@ func TestClaimCompletedKey(t *testing.T) {
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
-
+	
 	_, _, _, _, _ = store.Claim(context.Background(), key, requestHash, "token")
-
+	
 	wantBody := []byte(`{"ok": "true"}`)
-	err := store.Complete(context.Background(), key, "token", 201, []byte(""), wantBody)
+	headerBytes := []byte(`{"Content-Type":["text/plain"]}`)
+	err := store.Complete(context.Background(), key, "token", 201, headerBytes, wantBody)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	status, statusCode, _, savedBody, _ := store.Claim(context.Background(), key, requestHash, "token")
+	status, statusCode, savedHeaders, savedBody, _ := store.Claim(context.Background(), key, requestHash, "token")
 
 	if status != "completed" {
 		t.Errorf("Status returned = %s, requested %s", status, "completed")
@@ -88,6 +89,10 @@ func TestClaimCompletedKey(t *testing.T) {
 
 	if !bytes.Equal(savedBody, wantBody) {
 		t.Errorf("Respone body returned = %s, requested %s", savedBody, wantBody)
+	}
+
+	if !bytes.Equal(savedHeaders, headerBytes) {
+		t.Errorf("Header returned = %s, requested %s", savedHeaders, headerBytes)
 	}
 }
 
