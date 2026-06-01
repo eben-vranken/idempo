@@ -139,7 +139,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 				recorder.Header().Set("Content-Type", "application/problem+json")
 				recorder.WriteHeader(http.StatusInternalServerError)
 
-				pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
+				pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server idempotency store is unavailable.", r.URL.Path)
 
 				err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
 
