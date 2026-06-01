@@ -82,7 +82,16 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 }
 
 func (pgs *PostgresStore) Complete(ctx context.Context, key string, statusCode int, body []byte) error {
-	
+	_, err := pgs.pool.Exec(ctx, `
+				UPDATE pgStore
+				SET
+					state = $2,
+					responseCode = $3,
+					responseBody = $4
+				WHERE idempoKey = $1
+			`, key, "completed", statusCode, body)
+
+	return err
 }
 
 func New(connStr string) (*PostgresStore, error) {
