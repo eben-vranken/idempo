@@ -466,3 +466,61 @@ func TestHandlerPanicReleaseClaim(t *testing.T) {
 		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Idempotency-Replayed"), "false")
 	}
 }
+
+func TestHandlerPersistsAfterSlowHandler(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	var body []byte
+
+	count := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		time.Sleep(100 * time.Millisecond)
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("X-Custom", "42")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write(body)
+	})
+
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{PersistentTimeout: 50 * time.Millisecond})
+	handler := m.Handler(next)
+	handler.ServeHTTP(rec, req)
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(jsonRequest))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec2 := httptest.NewRecorder()
+
+	handler = m.Handler(next)
+	handler.ServeHTTP(rec2, req)
+
+	if rec2.Code != 201 {
+		t.Errorf("Code returned = %08b, expected %08b", rec2.Code, 201)
+	}
+
+	if rec2.Body.String() != string(body) {
+		t.Errorf("Body returned = %s, expected %s", rec2.Body.String(), `{order_id:123, "status": "created"}`)
+	}
+
+	if rec2.Header().Get("Idempotency-Replayed") != "true" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Idempotency-Replayed"), "true")
+	}
+
+	if rec2.Header().Get("X-Custom") != "42" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("X-Custom"), "42")
+	}
+
+	if rec2.Header().Get("Content-Type") != "text/plain" {
+		t.Errorf("Idempotency Returned = %s, expected %s", rec2.Header().Get("Content-Type"), "text/plain")
+	}
+
+	if count != 1 {
+		t.Errorf("Count returned = %d, expected %d", count, 2)
+	}
+}
