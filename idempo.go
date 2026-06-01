@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,14 +25,25 @@ type Store interface {
 }
 
 type Idempo struct {
-	store Store
+	store        Store
+	maxBodyBytes int64
 }
 
-func New(store Store) *Idempo {
+func New(store Store, opts Options) *Idempo {
+	if opts.MaxBodyBytes == 0 {
+		opts.MaxBodyBytes = defaultMaxBodyBytes
+	}
 	return &Idempo{
-		store: store,
+		store:        store,
+		maxBodyBytes: opts.MaxBodyBytes,
 	}
 }
+
+type Options struct {
+	MaxBodyBytes int64
+}
+
+const defaultMaxBodyBytes = 1 << 20
 
 type responseRecorder struct {
 	http.ResponseWriter
@@ -105,21 +117,38 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, m.maxBodyBytes)
 		body, err := io.ReadAll(r.Body)
 
 		if err != nil {
-			recorder.Header().Set("Content-Type", "application/problem+json")
-			recorder.WriteHeader(http.StatusInternalServerError)
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				recorder.Header().Set("Content-Type", "application/problem+json")
+				recorder.WriteHeader(http.StatusRequestEntityTooLarge)
 
-			pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
+				pd := writeProblem(413, "https://demo.com/errors/content-too-large", "Content Too Large", "Body request body size was too large", r.URL.Path)
 
-			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
+				err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
 
-			if err != nil {
-				log.Print(err)
+				if err != nil {
+					log.Print(err)
+				}
+
+				return
+			} else {
+				recorder.Header().Set("Content-Type", "application/problem+json")
+				recorder.WriteHeader(http.StatusInternalServerError)
+
+				pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
+
+				err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
+
+				if err != nil {
+					log.Print(err)
+				}
+
+				return
 			}
-
-			return
 		}
 
 		reader := bytes.NewReader(body)
