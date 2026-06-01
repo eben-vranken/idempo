@@ -6,7 +6,11 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/eben-vranken/idempo"
 )
+
+var _ idempo.Store = (*InMemStore)(nil)
 
 type Entry struct {
 	bodyHash     string

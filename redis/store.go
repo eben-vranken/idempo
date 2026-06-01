@@ -5,8 +5,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/eben-vranken/idempo"
 	goredis "github.com/redis/go-redis/v9"
 )
+
+var _ idempo.Store = (*RedisStore)(nil)
 
 var claimScript = `
 local data = redis.call('HGETALL', KEYS[1])
