@@ -3,6 +3,7 @@ package idempo
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -153,10 +154,10 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		reader := bytes.NewReader(body)
 		r.Body = io.NopCloser(reader)
 
-		bodyHash := hex.EncodeToString(body[:])
+		bodyHash := sha256.Sum256(body)
 
 		token := uuid.NewString()
-		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
+		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, hex.EncodeToString(bodyHash[:]), token)
 
 		if err != nil {
 			recorder.Header().Set("Content-Type", "application/problem+json")
