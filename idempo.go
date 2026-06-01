@@ -161,10 +161,17 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		reader := bytes.NewReader(body)
 		r.Body = io.NopCloser(reader)
 
-		bodyHash := sha256.Sum256(body)
+		h := sha256.New()
+		io.WriteString(h, r.Method)
+		io.WriteString(h, "\n")
+		io.WriteString(h, r.URL.Path)
+		io.WriteString(h, "\n")
+		h.Write(body)
+		sum := h.Sum(nil)
+		bodyHash := hex.EncodeToString(sum)
 
 		token := uuid.NewString()
-		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, hex.EncodeToString(bodyHash[:]), token)
+		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
 		if err != nil {
 			recorder.Header().Set("Content-Type", "application/problem+json")
