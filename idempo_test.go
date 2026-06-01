@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"github.com/eben-vranken/idempo/inmem"
 )
 
-func TestUUIDv7IsValid(t *testing.T) {
+func TestKeyValidation(t *testing.T) {
 	cases := []struct {
 		name       string
 		key        string
@@ -20,46 +21,46 @@ func TestUUIDv7IsValid(t *testing.T) {
 		nextCalled bool
 	}{
 		{
-			name:       "UUID too short",
-			key:        "abc",
-			wantCode:   400,
-			nextCalled: false,
-		},
-		{
-			name:       "Valid UUIDv4 with version nibble",
-			key:        "123e4567-e89b-42d3-a456-426614174000",
-			wantCode:   400,
-			nextCalled: false,
-		},
-		{
-			name:       "Bad variant nibble",
-			key:        "123e4567-e89b-72d3-7456-426614174000",
-			wantCode:   400,
-			nextCalled: false,
-		},
-		{
-			name:       "Non-hex character injected",
-			key:        "123e4567-e89b-72d3-a456-42661417z000",
-			wantCode:   400,
-			nextCalled: false,
-		},
-		{
-			name:       "Wrong hyphen position",
-			key:        "123e4567e-89b7-2d3a-8456-426614174000",
-			wantCode:   400,
-			nextCalled: false,
-		},
-		{
-			name:       "Uppercase hex",
-			key:        "123E4567-E89B-72D3-A456-426614174000",
+			name:       "Empty key passes through (no idempotency)",
+			key:        "",
 			wantCode:   200,
 			nextCalled: true,
 		},
 		{
-			name:       "Valid UUIDv7",
+			name:       "Short opaque key",
+			key:        "abc",
+			wantCode:   200,
+			nextCalled: true,
+		},
+		{
+			name:       "Arbitrary opaque key",
+			key:        "order-12345",
+			wantCode:   200,
+			nextCalled: true,
+		},
+		{
+			name:       "UUIDv4 is accepted",
+			key:        "123e4567-e89b-42d3-a456-426614174000",
+			wantCode:   200,
+			nextCalled: true,
+		},
+		{
+			name:       "UUIDv7 is accepted",
 			key:        "019e705d-bb1a-7085-9c1b-58a6a14a1aeb",
 			wantCode:   200,
 			nextCalled: true,
+		},
+		{
+			name:       "Max length key (255) is accepted",
+			key:        strings.Repeat("a", 255),
+			wantCode:   200,
+			nextCalled: true,
+		},
+		{
+			name:       "Over-long key (256) is rejected",
+			key:        strings.Repeat("a", 256),
+			wantCode:   400,
+			nextCalled: false,
 		},
 	}
 

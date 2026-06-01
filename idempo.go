@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +43,7 @@ type Options struct {
 }
 
 const defaultMaxBodyBytes = 1 << 20
+const maxKeyLen = 255
 
 type responseRecorder struct {
 	http.ResponseWriter
@@ -102,11 +102,11 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			statusCode:     http.StatusOK,
 		}
 
-		if !isValidUUIDv7(idemKey) {
+		if len(idemKey) > maxKeyLen {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusBadRequest)
 
-			pd := writeProblem(400, "https://demo.com/errors/bad-request", "Invalid Idempotency Key", "The Idempotency-Key header was provided but does not conform to the required UUIDv7 format.", r.URL.Path)
+			pd := writeProblem(400, "https://demo.com/errors/key-too-long", "Invalid Idempotency Key", "The Idempotency-Key header exceeds the maximum length of 255 characters", r.URL.Path)
 
 			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
 
@@ -244,45 +244,4 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			log.Print(err)
 		}
 	})
-}
-
-func isHex(b byte) bool {
-	return ('0' <= b && b <= '9') ||
-		('a' <= b && b <= 'f') ||
-		('A' <= b && b <= 'F')
-}
-
-func isValidUUIDv7(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-
-	if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
-		return false
-	}
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-
-		switch i {
-		case 8, 13, 18, 23:
-			continue
-		default:
-			if !isHex(c) {
-				return false
-			}
-		}
-	}
-
-	if s[14] != '7' {
-		return false
-	}
-
-	switch strings.ToLower(string(s[19])) {
-	case "8", "9", "a", "b":
-	default:
-		return false
-	}
-
-	return true
 }
