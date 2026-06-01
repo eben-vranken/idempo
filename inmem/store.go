@@ -13,12 +13,13 @@ import (
 var _ idempo.Store = (*InMemStore)(nil)
 
 type Entry struct {
-	token        string
-	bodyHash     string
-	state        string
-	responseCode int
-	responseBody []byte
-	expiryTime   time.Time
+	token           string
+	bodyHash        string
+	state           string
+	responseCode    int
+	responseHeaders []byte
+	responseBody    []byte
+	expiryTime      time.Time
 }
 
 type InMemStore struct {
@@ -32,7 +33,7 @@ func (ims *InMemStore) Close() {
 	close(ims.done)
 }
 
-func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (string, int, []byte, error) {
+func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (string, int, []byte, []byte, error) {
 	ims.m.Lock()
 	defer ims.m.Unlock()
 
@@ -47,7 +48,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 			expiryTime: time.Now().Add(ims.ttl),
 		}
 
-		return "new", 0, nil, nil
+		return "new", 0, nil, nil, nil
 	}
 
 	// Key exists but expired
@@ -59,28 +60,28 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 			expiryTime: time.Now().Add(ims.ttl),
 		}
 
-		return "new", 0, nil, nil
+		return "new", 0, nil, nil, nil
 	}
 
 	// Key exists, state is pending
 	if val.state == "pending" {
-		return val.state, val.responseCode, nil, nil
+		return val.state, val.responseCode, nil, nil, nil
 	}
 
 	// Key exists, body is different
 	if val.state == "completed" && val.bodyHash != requestHash {
-		return "conflict", http.StatusUnprocessableEntity, val.responseBody, nil
+		return "conflict", http.StatusUnprocessableEntity, nil, val.responseBody, nil
 	}
 
 	// Key exists, state is completed
 	if val.state == "completed" {
-		return val.state, val.responseCode, val.responseBody, nil
+		return val.state, val.responseCode, val.responseHeaders, val.responseBody, nil
 	}
 
-	return val.state, val.responseCode, val.responseBody, nil
+	return val.state, val.responseCode, nil, val.responseBody, nil
 }
 
-func (ims *InMemStore) Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error {
+func (ims *InMemStore) Complete(ctx context.Context, key string, token string, statusCode int, header []byte, body []byte) error {
 	ims.m.Lock()
 	defer ims.m.Unlock()
 
@@ -96,6 +97,7 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, token string, s
 
 	val.state = "completed"
 	val.responseCode = statusCode
+	val.responseHeaders = header
 	val.responseBody = body
 
 	return nil

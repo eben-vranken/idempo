@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS pgStore (
     token VARCHAR(255) NOT NULL,
     bodyHash VARCHAR(255) NULL,
     responseCode INT NULL,
+    responseHeaders BYTEA NULL,
     responseBody BYTEA NULL,
     expiryTime TIMESTAMPTZ NOT NULL
 );

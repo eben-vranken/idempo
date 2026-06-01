@@ -17,14 +17,15 @@ type PostgresStore struct {
 }
 
 type Entry struct {
-	state        string
-	bodyHash     *string
-	responseCode *int
-	responseBody []byte
-	expiryTime   time.Time
+	state           string
+	bodyHash        *string
+	responseCode    *int
+	responseHeaders []byte
+	responseBody    []byte
+	expiryTime      time.Time
 }
 
-func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (string, int, []byte, error) {
+func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (string, int, []byte, []byte, error) {
 	var state string
 	row := pgs.pool.QueryRow(ctx, `INSERT INTO pgStore (
 		idempoKey,
@@ -36,7 +37,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 	$1, 'pending', $2, $3, $4
 	)
 	ON CONFLICT (idempoKey) DO UPDATE 
-	SET state = 'pending', token = EXCLUDED.token, bodyHash = EXCLUDED.bodyHash, responseCode = NULL, responseBody = NULL, expiryTime = EXCLUDED.expiryTime
+	SET state = 'pending', token = EXCLUDED.token, bodyHash = EXCLUDED.bodyHash, responseCode = NULL, responseHeaders = NULL, responseBody = NULL, expiryTime = EXCLUDED.expiryTime
 	WHERE pgStore.expiryTime < now() RETURNING state`, key, token, bodyHash, time.Now().Add(pgs.ttl))
 
 	err := row.Scan(&state)
@@ -44,38 +45,39 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 	if err == pgx.ErrNoRows {
 		var entry Entry
 		row := pgs.pool.QueryRow(ctx, `SELECT 
-		state, bodyHash, responseCode, responseBody, expiryTime 
+		state, bodyHash, responseCode, responseHeaders, responseBody, expiryTime 
 		FROM pgStore WHERE idempoKey = $1`, key)
 
-		err := row.Scan(&entry.state, &entry.bodyHash, &entry.responseCode, &entry.responseBody, &entry.expiryTime)
+		err := row.Scan(&entry.state, &entry.bodyHash, &entry.responseCode, &entry.responseHeaders, &entry.responseBody, &entry.expiryTime)
 
 		if err != nil {
-			return "", 0, nil, err
+			return "", 0, nil, nil, err
 		} else if entry.state == "pending" {
-			return "pending", 0, nil, nil
+			return "pending", 0, nil, nil, nil
 		} else if entry.state == "completed" && entry.bodyHash != nil && bodyHash == *entry.bodyHash {
-			return "completed", *entry.responseCode, entry.responseBody, nil
+			return "completed", *entry.responseCode, entry.responseHeaders, entry.responseBody, nil
 		} else {
-			return "conflict", 0, nil, nil
+			return "conflict", 0, nil, nil, nil
 		}
 	}
 
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 
-	return "new", 0, nil, nil
+	return "new", 0, nil, nil, nil
 }
 
-func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error {
+func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error {
 	_, err := pgs.pool.Exec(ctx, `
 				UPDATE pgStore
 				SET
 					state = $2,
 					responseCode = $3,
-					responseBody = $4
-				WHERE idempoKey = $1 AND token = $5 AND state = 'pending'
-			`, key, "completed", statusCode, body, token)
+					responseHeaders = $4,
+					responseBody = $5
+				WHERE idempoKey = $1 AND token = $6 AND state = 'pending'
+			`, key, "completed", statusCode, headers, body, token)
 
 	return err
 }
@@ -117,6 +119,7 @@ func RunMigration(connStr string) error {
 		token VARCHAR(255) NOT NULL,
 		bodyHash VARCHAR(255) NULL,
 		responseCode INT NULL,
+		responseHeaders BYTEA NULL,
 		responseBody BYTEA NULL,
 		expiryTime TIMESTAMPTZ NOT NULL
 	);`)

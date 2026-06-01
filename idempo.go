@@ -16,9 +16,9 @@ import (
 )
 
 type Store interface {
-	Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedBody []byte, err error)
+	Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedHeaders []byte, savedBody []byte, err error)
 
-	Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error
+	Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error
 
 	Abandon(ctx context.Context, key string, token string) error
 }
@@ -35,16 +35,24 @@ func New(store Store) *Idempo {
 
 type responseRecorder struct {
 	http.ResponseWriter
-	statusCode int
-	body       []byte
+	statusCode  int
+	body        []byte
+	header      http.Header
+	wroteHeader bool
 }
 
 func (sr *responseRecorder) WriteHeader(code int) {
 	sr.statusCode = code
 	sr.ResponseWriter.WriteHeader(code)
+	sr.header = sr.ResponseWriter.Header().Clone()
+	sr.wroteHeader = true
 }
 
 func (sr *responseRecorder) Write(body []byte) (int, error) {
+	if !sr.wroteHeader {
+		sr.WriteHeader(http.StatusOK)
+	}
+
 	sr.body = append(sr.body, body...)
 	return sr.ResponseWriter.Write(body)
 }
@@ -120,7 +128,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
 
 		token := uuid.NewString()
-		status, savedCode, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
+		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
 		if err != nil {
 			recorder.Header().Set("Content-Type", "application/problem+json")
@@ -138,7 +146,13 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		}
 
 		if status == "completed" {
-			recorder.Header().Set("Content-Type", "application/json")
+			var header http.Header
+			json.Unmarshal(savedHeaders, &header)
+
+			for k, v := range header {
+				recorder.Header()[k] = v
+			}
+
 			recorder.Header().Set("Idempotency-Replayed", "true")
 			recorder.WriteHeader(savedCode)
 			recorder.Write(savedBody)
@@ -190,7 +204,11 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		if recorder.statusCode >= 500 {
 			err = m.store.Abandon(persistCtx, idemKey, token)
 		} else {
-			err = m.store.Complete(persistCtx, idemKey, token, recorder.statusCode, recorder.body)
+			headerBytes, marshalErr := json.Marshal(recorder.header)
+			if marshalErr != nil {
+				log.Print(marshalErr)
+			}
+			err = m.store.Complete(persistCtx, idemKey, token, recorder.statusCode, headerBytes, recorder.body)
 		}
 
 		if err != nil {

@@ -53,11 +53,11 @@ func TestInMemStoreOperations(t *testing.T) {
 			var err error
 
 			if tc.claimed {
-				status, _, _, err = store.Claim(tc.ctx, tc.key, tc.requestHash, "token")
+				status, _, _, _ , err = store.Claim(tc.ctx, tc.key, tc.requestHash, "token")
 			}
 
 			if tc.completed {
-				err = store.Complete(tc.ctx, tc.key, "token", 200, []byte(""))
+				err = store.Complete(tc.ctx, tc.key, "token", 200, []byte(""), []byte(""))
 			}
 
 			if status != tc.status {
@@ -80,9 +80,9 @@ func TestClaimReturnsPending(t *testing.T) {
 
 	store := inmem.New(ttl)
 
-	_, _, _, _ = store.Claim(ctx, key, requestHash, "token")
+	_, _, _, _, _  = store.Claim(ctx, key, requestHash, "token")
 
-	status, _, _, err := store.Claim(ctx, key, requestHash, "token")
+	status, _, _, _ , err := store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
@@ -102,9 +102,9 @@ func TestReturnsCompleted(t *testing.T) {
 
 	store := inmem.New(ttl)
 
-	status, _, _, _ := store.Claim(ctx, key, requestHash, "token")
-	err := store.Complete(ctx, key, "token", 200, []byte(""))
-	status, _, _, _ = store.Claim(ctx, key, requestHash, "token")
+	status, _, _, _, _ := store.Claim(ctx, key, requestHash, "token")
+	err := store.Complete(ctx, key, "token", 200, []byte(""), []byte(""))
+	status, _, _, _, _  = store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
@@ -124,8 +124,8 @@ func TestClaimExpiredKeyIsNew(t *testing.T) {
 
 	store := inmem.New(ttl)
 
-	_, _, _, _ = store.Claim(ctx, key, requestHash, "token")
-	status, _, _, err := store.Claim(ctx, key, requestHash, "token")
+	_, _, _, _ , _ = store.Claim(ctx, key, requestHash, "token")
+	status, _, _, _ , err := store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
