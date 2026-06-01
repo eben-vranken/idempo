@@ -24,25 +24,32 @@ type Store interface {
 }
 
 type Idempo struct {
-	store        Store
-	maxBodyBytes int64
+	store             Store
+	maxBodyBytes      int64
+	PersistentTimeout time.Duration
 }
 
 func New(store Store, opts Options) *Idempo {
 	if opts.MaxBodyBytes == 0 {
 		opts.MaxBodyBytes = defaultMaxBodyBytes
 	}
+	if opts.PersistentTimeout == 0 {
+		opts.PersistentTimeout = defaultPersistentTImeout
+	}
 	return &Idempo{
-		store:        store,
-		maxBodyBytes: opts.MaxBodyBytes,
+		store:             store,
+		maxBodyBytes:      opts.MaxBodyBytes,
+		PersistentTimeout: opts.PersistentTimeout,
 	}
 }
 
 type Options struct {
-	MaxBodyBytes int64
+	MaxBodyBytes      int64
+	PersistentTimeout time.Duration
 }
 
 const defaultMaxBodyBytes = 1 << 20
+const defaultPersistentTImeout = time.Second * 10
 const maxKeyLen = 255
 
 type responseRecorder struct {
@@ -217,18 +224,20 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
 		defer func() {
 			rec := recover()
 			if rec != nil {
-				_ = m.store.Abandon(persistCtx, idemKey, token)
+				abandonCtx, cancel := context.WithTimeout(context.Background(), m.PersistentTimeout)
+				_ = m.store.Abandon(abandonCtx, idemKey, token)
+				cancel()
 				panic(rec)
 			}
 		}()
 
 		next.ServeHTTP(recorder, r)
+		persistCtx, cancel := context.WithTimeout(context.Background(), m.PersistentTimeout)
+
+		defer cancel()
 
 		if recorder.statusCode >= 500 {
 			err = m.store.Abandon(persistCtx, idemKey, token)
