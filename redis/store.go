@@ -54,7 +54,7 @@ func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string)
 		}
 	}
 
-	return status, responseCode, []byte(responseBody), err
+	return status, responseCode, []byte(responseBody), nil
 }
 
 func (rs *RedisStore) Complete(ctx context.Context, key string, statusCode int, body []byte) error {
