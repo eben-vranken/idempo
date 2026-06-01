@@ -32,9 +32,11 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 		bodyHash,
 		expiryTime
 	) VALUES (
-	$1, $2, $3, $4
-	) ON CONFLICT (idempoKey) DO NOTHING
-	RETURNING state`, key, "pending", bodyHash, time.Now().Add(pgs.ttl))
+	$1, 'pending', $2, $3
+	)
+	ON CONFLICT (idempoKey) DO UPDATE 
+	SET state = 'pending', bodyHash = EXCLUDED.bodyHash, responseCode = NULL, responseBody = NULL, expiryTime = EXCLUDED.expiryTime
+	WHERE pgStore.expiryTime < now() RETURNING state`, key, bodyHash, time.Now().Add(pgs.ttl))
 
 	err := row.Scan(&state)
 
@@ -48,25 +50,6 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 
 		if err != nil {
 			return "", 0, nil, err
-		}
-
-		if entry.expiryTime.Before(time.Now()) {
-			_, err := pgs.pool.Exec(ctx, `
-				UPDATE pgStore
-				SET
-					state = $2,
-					bodyHash = NULL,
-					responseCode = NULL,
-					responseBody = NULL,
-					expiryTime = $3
-				WHERE idempoKey = $1
-			`, key, "pending", time.Now().Add(pgs.ttl))
-
-			if err != nil {
-				return "", 0, nil, err
-			}
-
-			return "new", 0, nil, nil
 		} else if entry.state == "pending" {
 			return "pending", 0, nil, nil
 		} else if entry.state == "completed" && entry.bodyHash != nil && bodyHash == *entry.bodyHash {
@@ -74,7 +57,9 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 		} else {
 			return "conflict", 0, nil, nil
 		}
-	} else if err != nil {
+	}
+
+	if err != nil {
 		return "", 0, nil, err
 	}
 
