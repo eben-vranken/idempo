@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
+
 	"github.com/google/uuid"
 )
 
@@ -17,6 +19,8 @@ type Store interface {
 	Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedBody []byte, err error)
 
 	Complete(ctx context.Context, key string, token string, statusCode int, body []byte) error
+
+	Abandon(ctx context.Context, key string, token string) error
 }
 
 type Idempo struct {
@@ -114,7 +118,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(reader)
 
 		bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
-		
+
 		token := uuid.NewString()
 		status, savedCode, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
@@ -170,9 +174,24 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
+		persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		defer func() {
+			rec := recover()
+			if rec != nil {
+				_ = m.store.Abandon(persistCtx, idemKey, token)
+				panic(rec)
+			}
+		}()
+
 		next.ServeHTTP(recorder, r)
 
-		err = m.store.Complete(r.Context(), idemKey, token, recorder.statusCode, recorder.body)
+		if recorder.statusCode >= 500 {
+			err = m.store.Abandon(persistCtx, idemKey, token)
+		} else {
+			err = m.store.Complete(persistCtx, idemKey, token, recorder.statusCode, recorder.body)
+		}
 
 		if err != nil {
 			log.Print(err)

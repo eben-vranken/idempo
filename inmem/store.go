@@ -101,6 +101,25 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, token string, s
 	return nil
 }
 
+func (ims *InMemStore) Abandon(ctx context.Context, key string, token string) error {
+	ims.m.Lock()
+	defer ims.m.Unlock()
+
+	val, ok := ims.keys[key]
+
+	if !ok {
+		return nil
+	}
+
+	if val.token != token {
+		return nil
+	}
+
+	delete(ims.keys, key)
+
+	return nil
+}
+
 func New(expireDuration time.Duration) *InMemStore {
 	ims := new(InMemStore)
 	ims.keys = make(map[string]*Entry)

@@ -80,6 +80,15 @@ func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string
 	return err
 }
 
+func (pgs *PostgresStore) Abandon(ctx context.Context, key string, token string) error {
+	_, err := pgs.pool.Exec(ctx, `
+				DELETE FROM pgStore
+				WHERE idempoKey = $1 AND token = $2 AND state = 'pending'
+			`, key, token)
+
+	return err
+}
+
 func New(connStr string, expireDuration time.Duration) (*PostgresStore, error) {
 	pgs := new(PostgresStore)
 	pool, err := pgxpool.New(context.Background(), connStr)
