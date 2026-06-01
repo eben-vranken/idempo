@@ -2,6 +2,8 @@ package pg
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/eben-vranken/idempo"
@@ -15,16 +17,22 @@ type PostgresStore struct {
 	pool         *pgxpool.Pool
 	lockTTL      time.Duration
 	retentionTTL time.Duration
+	closeOnce    sync.Once
 	done         chan struct{}
 }
 
-func (pgs *PostgresStore) Close() {
-	close(pgs.done)
+func (ims *PostgresStore) Close() {
+	ims.closeOnce.Do(func() {
+		close(ims.done)
+	})
 }
 
 func (pgs *PostgresStore) Sweep(ctx context.Context) error {
 	_, err := pgs.pool.Exec(ctx, "DELETE FROM pgStore WHERE expiryTime < now()")
-	return err
+	if err != nil {
+		return fmt.Errorf("pg sweep: %w", err)
+	}
+	return nil
 }
 
 type Entry struct {
@@ -62,7 +70,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 		err := row.Scan(&entry.state, &entry.bodyHash, &entry.responseCode, &entry.responseHeaders, &entry.responseBody, &entry.expiryTime)
 
 		if err != nil {
-			return "", 0, nil, nil, err
+			return "", 0, nil, nil, fmt.Errorf("pg claim select: %w", err)
 		} else if entry.state == "pending" {
 			return "pending", 0, nil, nil, nil
 		} else if entry.state == "completed" && entry.bodyHash != nil && bodyHash == *entry.bodyHash {
@@ -73,7 +81,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 	}
 
 	if err != nil {
-		return "", 0, nil, nil, err
+		return "", 0, nil, nil, fmt.Errorf("pg claim upsert: %w", err)
 	}
 
 	return "new", 0, nil, nil, nil
@@ -91,7 +99,10 @@ func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string
 				WHERE idempoKey = $1 AND token = $6 AND state = 'pending'
 			`, key, "completed", statusCode, headers, body, token, time.Now().Add(pgs.retentionTTL))
 
-	return err
+	if err != nil {
+		return fmt.Errorf("pg complete: %w", err)
+	}
+	return nil
 }
 
 func (pgs *PostgresStore) Abandon(ctx context.Context, key string, token string) error {
@@ -100,7 +111,10 @@ func (pgs *PostgresStore) Abandon(ctx context.Context, key string, token string)
 				WHERE idempoKey = $1 AND token = $2 AND state = 'pending'
 			`, key, token)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("pg abandon: %w", err)
+	}
+	return nil
 }
 
 func New(connStr string, lockTTL time.Duration, retentionTTL time.Duration) (*PostgresStore, error) {

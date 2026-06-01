@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -12,12 +13,12 @@ import (
 var _ idempo.Store = (*RedisStore)(nil)
 
 var claimScript = `
-	-- ARGV: 1=bodyHash, 2=ttlSeconds, 3=token
+	-- ARGV: 1=bodyHash, 2=ttlMillis, 3=token
 	-- return table: {status, responseCode, responseHeaders, responseBody}
 	local data = redis.call('HGETALL', KEYS[1])
 	if #data == 0 then
 		redis.call('HSET', KEYS[1], 'state', 'pending', 'bodyHash', ARGV[1], 'token', ARGV[3])
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
+		redis.call('PEXPIRE', KEYS[1], ARGV[2])
 		return {'new', '', '', ''}
 	end
 	local state, bodyHash, responseCode, responseHeaders, responseBody = '', '', '', '', ''
@@ -34,7 +35,7 @@ var claimScript = `
 `
 
 var completeScript = `
-	-- ARGV: 1=token, 2=responseCode, 3=responseHeaders, 4=responseBody, 5=ttlSeconds
+	-- ARGV: 1=token, 2=responseCode, 3=responseHeaders, 4=responseBody, 5=ttlMillis
 	local stored = redis.call('HGET', KEYS[1], 'token')
 	if stored ~= ARGV[1] then
 		return 0          -- not our claim (or key gone): no-op
@@ -43,7 +44,7 @@ var completeScript = `
 		return 0          -- already completed/reset: no-op
 	end
 	redis.call('HSET', KEYS[1], 'state', 'completed', 'responseCode', ARGV[2], 'responseHeaders', ARGV[3], 'responseBody', ARGV[4])
-	redis.call('EXPIRE', KEYS[1], ARGV[5])
+	redis.call('PEXPIRE', KEYS[1], ARGV[5])
 	return 1              -- completed
 `
 
@@ -62,10 +63,10 @@ type RedisStore struct {
 }
 
 func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedHeaders []byte, savedBody []byte, err error) {
-	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, int(rs.lockTTL.Seconds()), token).Result()
+	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, rs.lockTTL.Milliseconds(), token).Result()
 
 	if err != nil {
-		return "", 0, nil, nil, err
+		return "", 0, nil, nil, fmt.Errorf("redis claim eval: %w", err)
 	}
 
 	res := result.([]interface{})
@@ -79,7 +80,7 @@ func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string,
 	if responseCodeString != "" {
 		responseCode, err = strconv.Atoi(responseCodeString)
 		if err != nil {
-			return "", 0, nil, nil, err
+			return "", 0, nil, nil, fmt.Errorf("redis claim parse responseCode: %w", err)
 		}
 	}
 
@@ -87,10 +88,10 @@ func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string,
 }
 
 func (rs *RedisStore) Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error {
-	_, err := rs.client.Eval(ctx, completeScript, []string{key}, token, statusCode, headers, body, int(rs.retentionTTL.Seconds())).Result()
+	_, err := rs.client.Eval(ctx, completeScript, []string{key}, token, statusCode, headers, body, rs.retentionTTL.Milliseconds()).Result()
 
 	if err != nil {
-		return err
+		return fmt.Errorf("redis complete eval: %w", err)
 	}
 
 	return nil
@@ -100,7 +101,7 @@ func (rs *RedisStore) Abandon(ctx context.Context, key string, token string) err
 	_, err := rs.client.Eval(ctx, abandonScript, []string{key}, token).Result()
 
 	if err != nil {
-		return err
+		return fmt.Errorf("redis abandon eval: %w", err)
 	}
 
 	return nil

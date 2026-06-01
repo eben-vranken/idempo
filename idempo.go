@@ -3,10 +3,9 @@ package idempo
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -154,7 +153,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		reader := bytes.NewReader(body)
 		r.Body = io.NopCloser(reader)
 
-		bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
+		bodyHash := hex.EncodeToString(body[:])
 
 		token := uuid.NewString()
 		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)

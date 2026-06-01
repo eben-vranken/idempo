@@ -27,11 +27,15 @@ type InMemStore struct {
 	m            sync.Mutex
 	lockTTL      time.Duration
 	retentionTTL time.Duration
-	done         chan struct{}
+	closeOnce    sync.Once
+
+	done chan struct{}
 }
 
 func (ims *InMemStore) Close() {
-	close(ims.done)
+	ims.closeOnce.Do(func() {
+		close(ims.done)
+	})
 }
 
 func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (string, int, []byte, []byte, error) {
