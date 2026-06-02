@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -561,5 +563,55 @@ func TestHandlerSameKeyDifferentPathConflicts(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("Count returned = %d, expected %d", count, 1)
+	}
+}
+
+func TestHandlerConcurrentRequests(t *testing.T) {
+	jsonRequest := []byte(`{order_id:123, "status": "created"}`)
+
+	var execCount atomic.Int32
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		execCount.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, jsonRequest) {
+			t.Errorf("Body returned = %08b, requested %08b", body, jsonRequest)
+		}
+	})
+
+	m := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{})
+	handler := m.Handler(next)
+
+	const N = 50
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	codes := make([]int, N)
+
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/charge", bytes.NewBuffer(jsonRequest))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+			<-start
+			handler.ServeHTTP(rec, req)
+			codes[i] = rec.Code
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	if execCount.Load() != 1 {
+		t.Errorf("Atomic count returned = %d, expected %d", execCount.Load(), 1)
+	}
+
+	for _, c := range codes {
+		if c != 200 && c != 201 && c != 409 {
+			t.Errorf("Code returned = %d", c)
+		}
 	}
 }

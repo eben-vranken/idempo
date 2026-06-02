@@ -3,6 +3,9 @@ package redis_test
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +15,7 @@ import (
 )
 
 func TestClaimNewKey(t *testing.T) {
-	_, store := newTestStore(t)
+	_, store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -25,7 +28,7 @@ func TestClaimNewKey(t *testing.T) {
 }
 
 func TestClaimReturnsPending(t *testing.T) {
-	_, store := newTestStore(t)
+	_, store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -40,7 +43,7 @@ func TestClaimReturnsPending(t *testing.T) {
 }
 
 func TestClaimConflictedKey(t *testing.T) {
-	_, store := newTestStore(t)
+	_, store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -62,7 +65,7 @@ func TestClaimConflictedKey(t *testing.T) {
 }
 
 func TestClaimCompletedKey(t *testing.T) {
-	_, store := newTestStore(t)
+	_, store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -97,7 +100,7 @@ func TestClaimCompletedKey(t *testing.T) {
 }
 
 func TestExpiredTTL(t *testing.T) {
-	mr, store := newTestStore(t)
+	mr, store := newTestStore(t, time.Hour*24, time.Minute*5)
 
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
@@ -113,7 +116,52 @@ func TestExpiredTTL(t *testing.T) {
 	}
 }
 
-func newTestStore(t *testing.T) (*miniredis.Miniredis, *redis.RedisStore) {
+func TestClaimConcurrentSingleWinner(t *testing.T) {
+	_, store := newTestStore(t, time.Hour*24, time.Minute*5)
+
+	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
+	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
+	var newCount atomic.Int32
+	const N = 50
+	statuses := make([]string, N)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := range N {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			token := fmt.Sprintf("token-%d", i)
+			<-start
+			status, _, _, _, err := store.Claim(context.Background(), key, requestHash, token)
+
+			if err != nil {
+				t.Errorf("DB error: %s", err)
+			}
+
+			statuses[i] = status
+
+			if status == "new" {
+				newCount.Add(1)
+			}
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	if newCount.Load() != 1 {
+		t.Errorf("Atomic count returned = %d, expected %d", newCount.Load(), 1)
+	}
+
+	for _, c := range statuses {
+		if c != "new" && c != "pending" {
+			t.Errorf("Status returned = %s, expected 'new' or 'pending'", c)
+		}
+	}
+}
+
+func newTestStore(t *testing.T, lockTTL time.Duration, retentionTTL time.Duration) (*miniredis.Miniredis, *redis.RedisStore) {
 	mr, err := miniredis.Run()
 
 	if err != nil {
@@ -122,5 +170,5 @@ func newTestStore(t *testing.T) (*miniredis.Miniredis, *redis.RedisStore) {
 
 	t.Cleanup(func() { mr.Close() })
 
-	return mr, redis.New(&goredis.Options{Addr: mr.Addr()}, 24*time.Hour, 5*time.Minute)
+	return mr, redis.New(&goredis.Options{Addr: mr.Addr()}, lockTTL, retentionTTL)
 }
