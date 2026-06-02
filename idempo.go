@@ -16,7 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -94,6 +94,7 @@ type Idempo struct {
 	store             Store
 	maxBodyBytes      int64
 	PersistentTimeout time.Duration
+	logger            slog.Logger
 }
 
 // ClaimResult is the outcome of a Claim.
@@ -118,16 +119,21 @@ func New(store Store, opts Options) *Idempo {
 	if opts.PersistentTimeout == 0 {
 		opts.PersistentTimeout = defaultPersistentTImeout
 	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
 	return &Idempo{
 		store:             store,
 		maxBodyBytes:      opts.MaxBodyBytes,
 		PersistentTimeout: opts.PersistentTimeout,
+		logger:            *opts.Logger,
 	}
 }
 
 type Options struct {
 	MaxBodyBytes      int64
 	PersistentTimeout time.Duration
+	Logger            *slog.Logger
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -167,13 +173,23 @@ type problemDetails struct {
 	Instance string `json:"instance"`
 }
 
-func writeProblem(status int, problemType string, title string, detail string, instance string) problemDetails {
-	return problemDetails{
+// writeProblem sends an RFC 9457 problem+json response with the given status
+// and fields. It logs at Warn level if the response body cannot be written,
+// which usually means the client disconnected mid-response.
+func (m *Idempo) writeProblem(rec *responseRecorder, status int, problemType, title, detail, instance string) {
+	rec.Header().Set("Content-Type", "application/problem+json")
+	rec.WriteHeader(status)
+
+	pd := problemDetails{
 		Status:   status,
 		Type:     problemType,
 		Title:    title,
 		Detail:   detail,
 		Instance: instance,
+	}
+
+	if err := json.NewEncoder(rec.ResponseWriter).Encode(pd); err != nil {
+		m.logger.Warn("idempo: failed to write problem response", "err", err)
 	}
 }
 
@@ -192,17 +208,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		}
 
 		if len(idemKey) > maxKeyLen {
-			recorder.Header().Set("Content-Type", "application/problem+json")
-			recorder.WriteHeader(http.StatusBadRequest)
-
-			pd := writeProblem(400, "https://demo.com/errors/key-too-long", "Invalid Idempotency Key", "The Idempotency-Key header exceeds the maximum length of 255 characters", r.URL.Path)
-
-			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
-
-			if err != nil {
-				log.Print(err)
-			}
-
+			m.writeProblem(recorder, http.StatusBadRequest, "https://demo.com/errors/key-too-long", "Invalid Idempotency Key", "The Idempotency-Key header exceeds the maximum length of 255 characters", r.URL.Path)
 			return
 		}
 
@@ -212,32 +218,11 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		if err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
-				recorder.Header().Set("Content-Type", "application/problem+json")
-				recorder.WriteHeader(http.StatusRequestEntityTooLarge)
-
-				pd := writeProblem(413, "https://demo.com/errors/content-too-large", "Content Too Large", "Body request body size was too large", r.URL.Path)
-
-				err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
-
-				if err != nil {
-					log.Print(err)
-				}
-
-				return
+				m.writeProblem(recorder, http.StatusRequestEntityTooLarge, "https://demo.com/errors/content-too-large", "Content Too Large", "Body request body size was too large", r.URL.Path)
 			} else {
-				recorder.Header().Set("Content-Type", "application/problem+json")
-				recorder.WriteHeader(http.StatusInternalServerError)
-
-				pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server idempotency store is unavailable.", r.URL.Path)
-
-				err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
-
-				if err != nil {
-					log.Print(err)
-				}
-
-				return
+				m.writeProblem(recorder, http.StatusInternalServerError, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server idempotency store is unavailable.", r.URL.Path)
 			}
+			return
 		}
 
 		reader := bytes.NewReader(body)
@@ -256,17 +241,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		result, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
 		if err != nil {
-			recorder.Header().Set("Content-Type", "application/problem+json")
-			recorder.WriteHeader(http.StatusInternalServerError)
-
-			pd := writeProblem(500, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
-
-			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
-
-			if err != nil {
-				log.Print(err)
-			}
-
+			m.writeProblem(recorder, http.StatusInternalServerError, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
 			return
 		}
 
@@ -285,31 +260,12 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		}
 
 		if result.Status == StatusPending {
-			recorder.Header().Set("Content-Type", "application/problem+json")
-			recorder.WriteHeader(http.StatusConflict)
-
-			pd := writeProblem(409, "https://demo.com/errors/conflict", "Status Conflict", "Another request is already handing this request.", r.URL.Path)
-
-			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
-
-			if err != nil {
-				log.Print(err)
-			}
+			m.writeProblem(recorder, http.StatusConflict, "https://demo.com/errors/conflict", "Status Conflict", "Another request is already handing this request.", r.URL.Path)
 			return
 		}
 
 		if result.Status == StatusConflict {
-			recorder.Header().Set("Content-Type", "application/problem+json")
-			recorder.WriteHeader(http.StatusUnprocessableEntity)
-
-			pd := writeProblem(422, "https://demo.com/errors/body-mismatch", "Unprocessable Entity", "A request with this key but different body has hit this server already.", r.URL.Path)
-
-			err := json.NewEncoder(recorder.ResponseWriter).Encode(pd)
-
-			if err != nil {
-				log.Print(err)
-			}
-
+			m.writeProblem(recorder, http.StatusUnprocessableEntity, "https://demo.com/errors/body-mismatch", "Unprocessable Entity", "A request with this key but different body has hit this server already.", r.URL.Path)
 			return
 		}
 
@@ -333,13 +289,13 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		} else {
 			headerBytes, marshalErr := json.Marshal(recorder.header)
 			if marshalErr != nil {
-				log.Print(marshalErr)
+				m.logger.Error("idempo: failed to marshal response headers", "err", marshalErr)
 			}
 			err = m.store.Complete(persistCtx, idemKey, token, recorder.statusCode, headerBytes, recorder.body)
 		}
 
 		if err != nil {
-			log.Print(err)
+			m.logger.Error("idempo: failed to persist result", "err", err, "key", idemKey)
 		}
 	})
 }
