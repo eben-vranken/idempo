@@ -2,6 +2,8 @@ package idempo_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -613,5 +615,85 @@ func TestHandlerConcurrentRequests(t *testing.T) {
 		if c != 200 && c != 201 && c != 409 {
 			t.Errorf("Code returned = %d", c)
 		}
+	}
+}
+
+type fakeStore struct {
+	claimResult idempo.ClaimResult
+	claimErr    error
+	completeErr error
+	abandonErr  error
+}
+
+var _ idempo.Store = (*fakeStore)(nil)
+
+func (f *fakeStore) Claim(ctx context.Context, key, requestHash, token string) (idempo.ClaimResult, error) {
+	return f.claimResult, f.claimErr
+}
+
+func (f *fakeStore) Complete(ctx context.Context, key, token string, statusCode int, headers, body []byte) error {
+	return f.completeErr
+}
+
+func (f *fakeStore) Abandon(ctx context.Context, key, token string) error {
+	return f.abandonErr
+}
+
+func TestHandlerStoreClaimErrorFailsClosed(t *testing.T) {
+	store := &fakeStore{claimErr: errors.New("store down")}
+
+	count := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+	})
+
+	handler := idempo.New(store, idempo.Options{}).Handler(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != 500 {
+		t.Errorf("Code returned = %d, expected %d", rec.Code, 500)
+	}
+
+	if count != 0 {
+		t.Errorf("Count returned = %d, expected %d", count, 0)
+	}
+}
+
+func TestHandlerStoreCompleteErrorStillServesClient(t *testing.T) {
+	store := &fakeStore{
+		claimResult: idempo.ClaimResult{Status: idempo.StatusNew},
+		completeErr: errors.New("store down"),
+	}
+
+	count := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("ok"))
+	})
+
+	handler := idempo.New(store, idempo.Options{}).Handler(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != 201 {
+		t.Errorf("Code returned = %d, expected %d", rec.Code, 201)
+	}
+
+	if rec.Body.String() != "ok" {
+		t.Errorf("Body returned = %s, expected %s", rec.Body.String(), "ok")
+	}
+
+	if count != 1 {
+		t.Errorf("Count returned = %d, expected %d", count, 1)
 	}
 }
