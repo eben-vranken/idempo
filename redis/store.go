@@ -62,6 +62,10 @@ type RedisStore struct {
 	retentionTTL time.Duration
 }
 
+func (rs *RedisStore) Close() error {
+	return rs.client.Close()
+}
+
 func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (idempo.ClaimResult, error) {
 	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, rs.lockTTL.Milliseconds(), token).Result()
 

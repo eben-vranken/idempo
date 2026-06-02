@@ -24,6 +24,7 @@ type PostgresStore struct {
 func (ims *PostgresStore) Close() {
 	ims.closeOnce.Do(func() {
 		close(ims.done)
+		ims.pool.Close()
 	})
 }
 
