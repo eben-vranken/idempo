@@ -1,3 +1,11 @@
+// Package idempo provides framework-agnostic HTTP middleware that makes unsafe
+// requests idempotent using the IETF Idempotency-Key header.
+//
+// A client supplies an Idempotency-Key header. The middleware records the first
+// response produced for that key and replays it for any later request that
+// reuses the key, so a retried request runs its side effect at most once.
+// Storage is pluggable through the Store interface, with in-memory, Redis, and
+// Postgres backends provided in subpackages.
 package idempo
 
 import (
@@ -15,20 +23,70 @@ import (
 	"github.com/google/uuid"
 )
 
+// ClaimStatus is the outcome of a Claim, reported in ClaimResult.Status.
 type ClaimStatus string
 
 const (
-	StatusNew       ClaimStatus = "new"
-	StatusPending   ClaimStatus = "pending"
+	// StatusNew means the caller won the claim and now owns the key. It must
+	// eventually call Complete or Abandon with the same token.
+	StatusNew ClaimStatus = "new"
+	// StatusPending means another in-flight request already holds the key, so
+	// the caller should not run the handler.
+	StatusPending ClaimStatus = "pending"
+	// StatusCompleted means a previous request already finished. The stored
+	// response to replay is carried in ClaimResult.Code, Headers, and Body.
 	StatusCompleted ClaimStatus = "completed"
-	StatusConflict  ClaimStatus = "conflict"
+	// StatusConflict means the key exists but the request fingerprint differs
+	// from the stored one, so the same key was reused for a different request.
+	StatusConflict ClaimStatus = "conflict"
 )
 
+// Store persists idempotency records keyed by the idempotency key and backs the
+// middleware with a pluggable storage backend.
+//
+// Implementations must be safe for concurrent use by multiple goroutines: the
+// middleware calls Store from many request handlers at once. Each record
+// follows a lifecycle of a single Claim followed by exactly one Complete or
+// Abandon, matched by a caller-generated fencing token.
 type Store interface {
+	// Claim atomically attempts to reserve key for the current request.
+	//
+	// The atomicity guarantee is the core of the middleware: when many requests
+	// claim the same key at once, exactly one of them receives StatusNew.
+	//
+	// requestHash is an opaque fingerprint of the request; the store only
+	// compares it and never interprets it. token is a unique, caller-generated
+	// fencing token for this attempt; the store must persist it so that Complete
+	// and Abandon can later verify ownership.
+	//
+	// The returned ClaimResult.Status is one of:
+	//   - StatusNew: the caller won and now owns the key, held pending under the
+	//     lock TTL. It must later call Complete or Abandon with the same token.
+	//   - StatusPending: another request already holds an in-flight claim.
+	//   - StatusCompleted: a previous request finished; the response to replay is
+	//     in ClaimResult.Code, Headers, and Body.
+	//   - StatusConflict: the key exists but requestHash differs from the stored
+	//     fingerprint.
+	//
+	// An expired pending or completed record may be reclaimed as StatusNew.
+	// Claim must honor ctx cancellation and deadlines.
 	Claim(ctx context.Context, key string, requestHash string, token string) (ClaimResult, error)
 
+	// Complete records the final response for a finished request and moves the
+	// record to a completed state, retained under the retention TTL.
+	//
+	// Complete must be a no-op if the stored token does not match token, or if
+	// the record is not pending. This fencing rule prevents a slow request from
+	// overwriting a claim that a newer request now owns. Complete must honor ctx
+	// cancellation and deadlines.
 	Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error
 
+	// Abandon releases a claim so the key can be retried, for example after the
+	// handler fails, returns a 5xx, or panics.
+	//
+	// Abandon must be a no-op if the stored token does not match token, so a late
+	// call cannot release a claim that a newer request now owns. Abandon must
+	// honor ctx cancellation and deadlines.
 	Abandon(ctx context.Context, key string, token string) error
 }
 
@@ -38,11 +96,19 @@ type Idempo struct {
 	PersistentTimeout time.Duration
 }
 
+// ClaimResult is the outcome of a Claim.
+//
+// Code, Headers, and Body carry the stored response to replay and are populated
+// only when Status is StatusCompleted; otherwise they are zero.
 type ClaimResult struct {
-	Status  ClaimStatus
-	Code    int
+	// Status is the claim outcome and is always set.
+	Status ClaimStatus
+	// Code is the stored response status code.
+	Code int
+	// Headers is the stored response header set, exactly as written to Complete.
 	Headers []byte
-	Body    []byte
+	// Body is the stored response body, exactly as written to Complete.
+	Body []byte
 }
 
 func New(store Store, opts Options) *Idempo {
