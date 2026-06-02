@@ -9,6 +9,7 @@
 package idempo
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -17,6 +18,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -140,12 +142,19 @@ const defaultMaxBodyBytes = 1 << 20
 const defaultPersistentTImeout = time.Second * 10
 const maxKeyLen = 255
 
+// responseRecorder wraps an http.ResponseWriter to capture the status code,
+// headers, and body so a successful response can be stored and replayed.
+//
+// It forwards Flush and Hijack to the underlying writer when supported, but
+// intentionally does not implement io.ReaderFrom: ReadFrom would bypass Write,
+// leaving the body uncaptured and therefore unreplayable.
 type responseRecorder struct {
 	http.ResponseWriter
 	statusCode  int
 	body        []byte
 	header      http.Header
 	wroteHeader bool
+	hijacked    bool
 }
 
 func (sr *responseRecorder) WriteHeader(code int) {
@@ -162,6 +171,27 @@ func (sr *responseRecorder) Write(body []byte) (int, error) {
 
 	sr.body = append(sr.body, body...)
 	return sr.ResponseWriter.Write(body)
+}
+
+// Flush implements http.Flusher, delegating to the underlying ResponseWriter
+// when it supports flushing, so streaming responses such as SSE work through
+// the middleware.
+func (sr *responseRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack implements http.Hijacker so connection upgrades such as WebSockets
+// work through the middleware. Once hijacked there is no recordable HTTP
+// response, so the handler skips persistence for the request.
+func (sr *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := sr.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("idempo: underlying ResponseWriter does not support hijacking")
+	}
+	sr.hijacked = true
+	return hj.Hijack()
 }
 
 // RFC 9457 compliant problem details
@@ -284,7 +314,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 
 		defer cancel()
 
-		if recorder.statusCode >= 500 {
+		if recorder.hijacked || recorder.statusCode >= 500 {
 			err = m.store.Abandon(persistCtx, idemKey, token)
 		} else {
 			headerBytes, marshalErr := json.Marshal(recorder.header)

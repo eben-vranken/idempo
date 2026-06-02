@@ -1,10 +1,12 @@
 package idempo_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -582,11 +584,12 @@ func TestHandlerConcurrentRequests(t *testing.T) {
 }
 
 type fakeStore struct {
-	claimResult idempo.ClaimResult
-	claimErr    error
-	completeErr error
-	abandonErr  error
-	completed   bool
+	claimResult   idempo.ClaimResult
+	claimErr      error
+	completeErr   error
+	abandonErr    error
+	completed     bool
+	abandonCalled bool
 }
 
 var _ idempo.Store = (*fakeStore)(nil)
@@ -604,6 +607,7 @@ func (f *fakeStore) Complete(ctx context.Context, key, token string, statusCode 
 }
 
 func (f *fakeStore) Abandon(ctx context.Context, key, token string) error {
+	f.abandonCalled = true
 	return f.abandonErr
 }
 
@@ -663,5 +667,69 @@ func TestHandlerStoreCompleteErrorStillServesClient(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("Count returned = %d, expected %d", count, 1)
+	}
+}
+
+func TestHandlerExposesFlusher(t *testing.T) {
+	flushed := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("ResponseWriter does not implement http.Flusher")
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("chunk"))
+		f.Flush()
+		flushed = true
+	})
+
+	handler := idempo.New(inmem.New(24*time.Hour, 5*time.Minute), idempo.Options{}).Handler(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !flushed {
+		t.Error("handler did not flush: http.Flusher was not exposed through the middleware")
+	}
+}
+
+// hijackableRecorder is an httptest.ResponseRecorder that also implements
+// http.Hijacker, so the middleware can forward Hijack to it in tests.
+type hijackableRecorder struct {
+	*httptest.ResponseRecorder
+}
+
+func (h *hijackableRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, nil
+}
+
+func TestHandlerHijackAbandonsClaim(t *testing.T) {
+	store := &fakeStore{claimResult: idempo.ClaimResult{Status: idempo.StatusNew}}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("ResponseWriter does not implement http.Hijacker")
+		}
+		hj.Hijack()
+	})
+
+	handler := idempo.New(store, idempo.Options{}).Handler(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := &hijackableRecorder{httptest.NewRecorder()}
+
+	handler.ServeHTTP(rec, req)
+
+	if !store.abandonCalled {
+		t.Error("expected the claim to be abandoned after a hijack")
+	}
+
+	if store.completed {
+		t.Error("expected no Complete after a hijack")
 	}
 }
