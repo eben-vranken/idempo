@@ -6,6 +6,8 @@ Go middleware implementing the IETF Idempotency-Key draft RFC with pluggable sto
 
 It relies purely on Go's native `net/http` primitives and works seamlessly with `chi`, `gin`, `echo`, or the standard library mux.
 
+[![CI](https://github.com/eben-vranken/idempo/actions/workflows/ci.yml/badge.svg)](https://github.com/eben-vranken/idempo/actions/workflows/ci.yml)
+
 ## Features
 
 * **IETF & Stripe Semantics:** Fully aligns with draft RFC standards and Stripe-style idempotency behavior.
