@@ -92,7 +92,7 @@ func TestClaimCompletedKey(t *testing.T) {
 	}
 
 	if !bytes.Equal(result.Body, wantBody) {
-		t.Errorf("Respone body returned = %s, requested %s", result.Body, wantBody)
+		t.Errorf("Response body returned = %s, requested %s", result.Body, wantBody)
 	}
 
 	if !bytes.Equal(result.Headers, headerBytes) {
