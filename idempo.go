@@ -259,7 +259,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		}
 
 		if len(idemKey) > maxKeyLen {
-			m.writeProblem(recorder, http.StatusBadRequest, "https://demo.com/errors/key-too-long", "Invalid Idempotency Key", "The Idempotency-Key header exceeds the maximum length of 255 characters", r.URL.Path)
+			m.writeProblem(recorder, http.StatusBadRequest, "https://eben-vranken.github.io/idempo-docs/errors/key-too-long/", "Invalid Idempotency Key", "The Idempotency-Key header exceeds the maximum length of 255 characters", r.URL.Path)
 			return
 		}
 
@@ -269,9 +269,9 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		if err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
-				m.writeProblem(recorder, http.StatusRequestEntityTooLarge, "https://demo.com/errors/content-too-large", "Content Too Large", "Body request body size was too large", r.URL.Path)
+				m.writeProblem(recorder, http.StatusRequestEntityTooLarge, "https://eben-vranken.github.io/idempo-docs/errors/content-too-large/", "Content Too Large", "Body request body size was too large", r.URL.Path)
 			} else {
-				m.writeProblem(recorder, http.StatusInternalServerError, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server idempotency store is unavailable.", r.URL.Path)
+				m.writeProblem(recorder, http.StatusInternalServerError, "https://eben-vranken.github.io/idempo-docs/errors/internal-server-error/", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
 			}
 			return
 		}
@@ -292,7 +292,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		result, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
 		if err != nil {
-			m.writeProblem(recorder, http.StatusInternalServerError, "https://demo.com/errors/internal-server-error", "Internal Server Error", "Our server failed parsing the request body.", r.URL.Path)
+			m.writeProblem(recorder, http.StatusInternalServerError, "https://eben-vranken.github.io/idempo-docs/errors/internal-server-error/", "Internal Server Error", "Our server idempotency store is unavailable.", r.URL.Path)
 			return
 		}
 
@@ -311,12 +311,12 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		}
 
 		if result.Status == StatusPending {
-			m.writeProblem(recorder, http.StatusConflict, "https://demo.com/errors/conflict", "Status Conflict", "Another request is already handing this request.", r.URL.Path)
+			m.writeProblem(recorder, http.StatusConflict, "https://eben-vranken.github.io/idempo-docs/errors/conflict/", "Status Conflict", "Another request is already handing this request.", r.URL.Path)
 			return
 		}
 
 		if result.Status == StatusConflict {
-			m.writeProblem(recorder, http.StatusUnprocessableEntity, "https://demo.com/errors/body-mismatch", "Unprocessable Entity", "A request with this key but different body has hit this server already.", r.URL.Path)
+			m.writeProblem(recorder, http.StatusUnprocessableEntity, "https://eben-vranken.github.io/idempo-docs/errors/body-mismatch/", "Unprocessable Entity", "A request with this key but different body has hit this server already.", r.URL.Path)
 			return
 		}
 
