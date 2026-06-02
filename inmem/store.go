@@ -15,7 +15,7 @@ var _ idempo.Store = (*InMemStore)(nil)
 type Entry struct {
 	token           string
 	bodyHash        string
-	state           string
+	state           idempo.ClaimStatus
 	responseCode    int
 	responseHeaders []byte
 	responseBody    []byte
@@ -38,7 +38,7 @@ func (ims *InMemStore) Close() {
 	})
 }
 
-func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (string, int, []byte, []byte, error) {
+func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (idempo.ClaimStatus, int, []byte, []byte, error) {
 	ims.m.Lock()
 	defer ims.m.Unlock()
 
@@ -49,11 +49,11 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 		ims.keys[key] = &Entry{
 			token:      token,
 			bodyHash:   requestHash,
-			state:      "pending",
+			state:      idempo.StatusPending,
 			expiryTime: time.Now().Add(ims.lockTTL),
 		}
 
-		return "new", 0, nil, nil, nil
+		return idempo.StatusNew, 0, nil, nil, nil
 	}
 
 	// Key exists but expired
@@ -61,25 +61,25 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 		ims.keys[key] = &Entry{
 			token:      token,
 			bodyHash:   requestHash,
-			state:      "pending",
+			state:      idempo.StatusPending,
 			expiryTime: time.Now().Add(ims.lockTTL),
 		}
 
-		return "new", 0, nil, nil, nil
+		return idempo.StatusNew, 0, nil, nil, nil
 	}
 
 	// Key exists, state is pending
-	if val.state == "pending" {
+	if val.state == idempo.StatusPending {
 		return val.state, val.responseCode, nil, nil, nil
 	}
 
 	// Key exists, body is different
-	if val.state == "completed" && val.bodyHash != requestHash {
-		return "conflict", http.StatusUnprocessableEntity, nil, val.responseBody, nil
+	if val.state == idempo.StatusCompleted && val.bodyHash != requestHash {
+		return idempo.StatusConflict, http.StatusUnprocessableEntity, nil, val.responseBody, nil
 	}
 
 	// Key exists, state is completed
-	if val.state == "completed" {
+	if val.state == idempo.StatusCompleted {
 		return val.state, val.responseCode, val.responseHeaders, val.responseBody, nil
 	}
 
@@ -100,7 +100,7 @@ func (ims *InMemStore) Complete(ctx context.Context, key string, token string, s
 		return nil
 	}
 
-	val.state = "completed"
+	val.state = idempo.StatusCompleted
 	val.responseCode = statusCode
 	val.responseHeaders = header
 	val.responseBody = body

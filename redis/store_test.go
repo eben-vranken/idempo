@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/eben-vranken/idempo"
 	"github.com/eben-vranken/idempo/redis"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -22,8 +23,8 @@ func TestClaimNewKey(t *testing.T) {
 
 	status, _, _, _, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != "new" {
-		t.Errorf("Status returned = %s, requested %s", status, "new")
+	if status != idempo.StatusNew {
+		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusNew)
 	}
 }
 
@@ -37,8 +38,8 @@ func TestClaimReturnsPending(t *testing.T) {
 
 	status, _, _, _, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != "pending" {
-		t.Errorf("Status returned = %s, requested %s", status, "pending")
+	if status != idempo.StatusPending {
+		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusPending)
 	}
 }
 
@@ -59,8 +60,8 @@ func TestClaimConflictedKey(t *testing.T) {
 	differentRequestHash := "81fd8e12b33d548c41873494bb73c2c6b841b157ce0860857e70f41af9f24337"
 	status, _, _, _, _ := store.Claim(context.Background(), key, differentRequestHash, "token")
 
-	if status != "conflict" {
-		t.Errorf("Status returned = %s, requested %s", status, "conflict")
+	if status != idempo.StatusConflict {
+		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusConflict)
 	}
 }
 
@@ -82,8 +83,8 @@ func TestClaimCompletedKey(t *testing.T) {
 
 	status, statusCode, savedHeaders, savedBody, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != "completed" {
-		t.Errorf("Status returned = %s, requested %s", status, "completed")
+	if status != idempo.StatusCompleted {
+		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusCompleted)
 	}
 
 	if statusCode != 201 {
@@ -111,8 +112,8 @@ func TestExpiredTTL(t *testing.T) {
 
 	status, _, _, _, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != "new" {
-		t.Errorf("Status returned = %s, requested %s", status, "new")
+	if status != idempo.StatusNew {
+		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusNew)
 	}
 }
 
@@ -123,7 +124,7 @@ func TestClaimConcurrentSingleWinner(t *testing.T) {
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
 	var newCount atomic.Int32
 	const N = 50
-	statuses := make([]string, N)
+	statuses := make([]idempo.ClaimStatus, N)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 
@@ -141,7 +142,7 @@ func TestClaimConcurrentSingleWinner(t *testing.T) {
 
 			statuses[i] = status
 
-			if status == "new" {
+			if status == idempo.StatusNew {
 				newCount.Add(1)
 			}
 		}(i)
@@ -155,7 +156,7 @@ func TestClaimConcurrentSingleWinner(t *testing.T) {
 	}
 
 	for _, c := range statuses {
-		if c != "new" && c != "pending" {
+		if c != idempo.StatusNew && c != idempo.StatusPending {
 			t.Errorf("Status returned = %s, expected 'new' or 'pending'", c)
 		}
 	}

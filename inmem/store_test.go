@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eben-vranken/idempo"
 	"github.com/eben-vranken/idempo/inmem"
 )
 
@@ -22,8 +23,8 @@ func TestClaimNewKey(t *testing.T) {
 		t.Errorf("Error returned = %s, requested nil", err)
 	}
 
-	if status != "new" {
-		t.Errorf("Status returned = %s, requested %s", status, "new")
+	if status != idempo.StatusNew {
+		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusNew)
 	}
 }
 
@@ -44,7 +45,7 @@ func TestClaimReturnsPending(t *testing.T) {
 	ctx := context.Background()
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
-	statusExpected := "pending"
+	statusExpected := idempo.StatusPending
 
 	store := inmem.New(24*time.Hour, 5*time.Minute)
 
@@ -65,7 +66,7 @@ func TestReturnsCompleted(t *testing.T) {
 	ctx := context.Background()
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
-	statusExpected := "completed"
+	statusExpected := idempo.StatusCompleted
 
 	store := inmem.New(24*time.Hour, 5*time.Minute)
 	status, _, _, _, _ := store.Claim(ctx, key, requestHash, "token")
@@ -91,7 +92,7 @@ func TestClaimExpiredKeyIsNew(t *testing.T) {
 	ctx := context.Background()
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
-	statusExpected := "new"
+	statusExpected := idempo.StatusNew
 
 	store := inmem.New(-1*time.Hour, 5*time.Minute)
 

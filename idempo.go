@@ -15,8 +15,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type ClaimStatus string
+
+const (
+	StatusNew       ClaimStatus = "new"
+	StatusPending   ClaimStatus = "pending"
+	StatusCompleted ClaimStatus = "completed"
+	StatusConflict  ClaimStatus = "conflict"
+)
+
 type Store interface {
-	Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedHeaders []byte, savedBody []byte, err error)
+	Claim(ctx context.Context, key string, requestHash string, token string) (status ClaimStatus, savedCode int, savedHeaders []byte, savedBody []byte, err error)
 
 	Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error
 
@@ -188,7 +197,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		if status == "completed" {
+		if status == StatusCompleted {
 			var header http.Header
 			json.Unmarshal(savedHeaders, &header)
 
@@ -202,7 +211,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		if status == "pending" {
+		if status == StatusPending {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusConflict)
 
@@ -216,7 +225,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		if status == "conflict" {
+		if status == StatusConflict {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusUnprocessableEntity)
 

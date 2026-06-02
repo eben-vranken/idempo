@@ -44,7 +44,7 @@ type Entry struct {
 	expiryTime      time.Time
 }
 
-func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (string, int, []byte, []byte, error) {
+func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (idempo.ClaimStatus, int, []byte, []byte, error) {
 	var state string
 	row := pgs.pool.QueryRow(ctx, `INSERT INTO pgStore (
 		idempoKey,
@@ -71,12 +71,12 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 
 		if err != nil {
 			return "", 0, nil, nil, fmt.Errorf("pg claim select: %w", err)
-		} else if entry.state == "pending" {
-			return "pending", 0, nil, nil, nil
-		} else if entry.state == "completed" && entry.bodyHash != nil && bodyHash == *entry.bodyHash {
-			return "completed", *entry.responseCode, entry.responseHeaders, entry.responseBody, nil
+		} else if entry.state == string(idempo.StatusPending) {
+			return idempo.StatusPending, 0, nil, nil, nil
+		} else if entry.state == string(idempo.StatusCompleted) && entry.bodyHash != nil && bodyHash == *entry.bodyHash {
+			return idempo.StatusCompleted, *entry.responseCode, entry.responseHeaders, entry.responseBody, nil
 		} else {
-			return "conflict", 0, nil, nil, nil
+			return idempo.StatusConflict, 0, nil, nil, nil
 		}
 	}
 
@@ -84,7 +84,7 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 		return "", 0, nil, nil, fmt.Errorf("pg claim upsert: %w", err)
 	}
 
-	return "new", 0, nil, nil, nil
+	return idempo.StatusNew, 0, nil, nil, nil
 }
 
 func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error {
@@ -97,7 +97,7 @@ func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string
 					responseBody = $5,
 					expiryTime = $7
 				WHERE idempoKey = $1 AND token = $6 AND state = 'pending'
-			`, key, "completed", statusCode, headers, body, token, time.Now().Add(pgs.retentionTTL))
+			`, key, string(idempo.StatusCompleted), statusCode, headers, body, token, time.Now().Add(pgs.retentionTTL))
 
 	if err != nil {
 		return fmt.Errorf("pg complete: %w", err)

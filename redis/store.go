@@ -62,7 +62,7 @@ type RedisStore struct {
 	retentionTTL time.Duration
 }
 
-func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (status string, savedCode int, savedHeaders []byte, savedBody []byte, err error) {
+func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (status idempo.ClaimStatus, savedCode int, savedHeaders []byte, savedBody []byte, err error) {
 	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, rs.lockTTL.Milliseconds(), token).Result()
 
 	if err != nil {
@@ -71,7 +71,7 @@ func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string,
 
 	res := result.([]interface{})
 
-	status = res[0].(string)
+	status = idempo.ClaimStatus(res[0].(string))
 	responseCodeString := res[1].(string)
 	responseHeaders := res[2].(string)
 	responseBody := res[3].(string)
