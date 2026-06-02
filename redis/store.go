@@ -62,16 +62,16 @@ type RedisStore struct {
 	retentionTTL time.Duration
 }
 
-func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (status idempo.ClaimStatus, savedCode int, savedHeaders []byte, savedBody []byte, err error) {
+func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string, token string) (idempo.ClaimResult, error) {
 	result, err := rs.client.Eval(ctx, claimScript, []string{key}, requestHash, rs.lockTTL.Milliseconds(), token).Result()
 
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("redis claim eval: %w", err)
+		return idempo.ClaimResult{}, fmt.Errorf("redis claim eval: %w", err)
 	}
 
 	res := result.([]interface{})
 
-	status = idempo.ClaimStatus(res[0].(string))
+	status := idempo.ClaimStatus(res[0].(string))
 	responseCodeString := res[1].(string)
 	responseHeaders := res[2].(string)
 	responseBody := res[3].(string)
@@ -80,11 +80,16 @@ func (rs *RedisStore) Claim(ctx context.Context, key string, requestHash string,
 	if responseCodeString != "" {
 		responseCode, err = strconv.Atoi(responseCodeString)
 		if err != nil {
-			return "", 0, nil, nil, fmt.Errorf("redis claim parse responseCode: %w", err)
+			return idempo.ClaimResult{}, fmt.Errorf("redis claim parse responseCode: %w", err)
 		}
 	}
 
-	return status, responseCode, []byte(responseHeaders), []byte(responseBody), nil
+	return idempo.ClaimResult{
+		Status:  status,
+		Code:    responseCode,
+		Headers: []byte(responseHeaders),
+		Body:    []byte(responseBody),
+	}, nil
 }
 
 func (rs *RedisStore) Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error {

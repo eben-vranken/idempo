@@ -21,10 +21,10 @@ func TestClaimNewKey(t *testing.T) {
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
 
-	status, _, _, _, _ := store.Claim(context.Background(), key, requestHash, "token")
+	result, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != idempo.StatusNew {
-		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusNew)
+	if result.Status != idempo.StatusNew {
+		t.Errorf("Status returned = %s, requested %s", result.Status, idempo.StatusNew)
 	}
 }
 
@@ -34,12 +34,12 @@ func TestClaimReturnsPending(t *testing.T) {
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
 
-	_, _, _, _, _ = store.Claim(context.Background(), key, requestHash, "token")
+	_, _ = store.Claim(context.Background(), key, requestHash, "token")
 
-	status, _, _, _, _ := store.Claim(context.Background(), key, requestHash, "token")
+	result, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != idempo.StatusPending {
-		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusPending)
+	if result.Status != idempo.StatusPending {
+		t.Errorf("Status returned = %s, requested %s", result.Status, idempo.StatusPending)
 	}
 }
 
@@ -49,19 +49,19 @@ func TestClaimConflictedKey(t *testing.T) {
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
 
-	_, statusCode, savedHeader, savedBody, _ := store.Claim(context.Background(), key, requestHash, "token")
+	result, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	err := store.Complete(context.Background(), key, "token", statusCode, savedHeader, savedBody)
+	err := store.Complete(context.Background(), key, "token", result.Code, result.Headers, result.Body)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	differentRequestHash := "81fd8e12b33d548c41873494bb73c2c6b841b157ce0860857e70f41af9f24337"
-	status, _, _, _, _ := store.Claim(context.Background(), key, differentRequestHash, "token")
+	result, _ = store.Claim(context.Background(), key, differentRequestHash, "token")
 
-	if status != idempo.StatusConflict {
-		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusConflict)
+	if result.Status != idempo.StatusConflict {
+		t.Errorf("Status returned = %s, requested %s", result.Status, idempo.StatusConflict)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestClaimCompletedKey(t *testing.T) {
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
 
-	_, _, _, _, _ = store.Claim(context.Background(), key, requestHash, "token")
+	_, _ = store.Claim(context.Background(), key, requestHash, "token")
 
 	wantBody := []byte(`{"ok": "true"}`)
 	headerBytes := []byte(`{"Content-Type":["text/plain"]}`)
@@ -81,22 +81,22 @@ func TestClaimCompletedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, statusCode, savedHeaders, savedBody, _ := store.Claim(context.Background(), key, requestHash, "token")
+	result, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != idempo.StatusCompleted {
-		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusCompleted)
+	if result.Status != idempo.StatusCompleted {
+		t.Errorf("Status returned = %s, requested %s", result.Status, idempo.StatusCompleted)
 	}
 
-	if statusCode != 201 {
-		t.Errorf("Status code returned = %d, requested %d", statusCode, 201)
+	if result.Code != 201 {
+		t.Errorf("Status code returned = %d, requested %d", result.Code, 201)
 	}
 
-	if !bytes.Equal(savedBody, wantBody) {
-		t.Errorf("Respone body returned = %s, requested %s", savedBody, wantBody)
+	if !bytes.Equal(result.Body, wantBody) {
+		t.Errorf("Respone body returned = %s, requested %s", result.Body, wantBody)
 	}
 
-	if !bytes.Equal(savedHeaders, headerBytes) {
-		t.Errorf("Header returned = %s, requested %s", savedHeaders, headerBytes)
+	if !bytes.Equal(result.Headers, headerBytes) {
+		t.Errorf("Header returned = %s, requested %s", result.Headers, headerBytes)
 	}
 }
 
@@ -106,14 +106,14 @@ func TestExpiredTTL(t *testing.T) {
 	key := "019e7514-3f4e-7e25-b2cf-9d33b76340eb"
 	requestHash := "5d1aae56cb6a81850e92f3fdd528cf06f7f95eb13fb485ac73ebd5fbc30b1c8f"
 
-	_, _, _, _, _ = store.Claim(context.Background(), key, requestHash, "token")
+	_, _ = store.Claim(context.Background(), key, requestHash, "token")
 
 	mr.FastForward(25 * time.Hour)
 
-	status, _, _, _, _ := store.Claim(context.Background(), key, requestHash, "token")
+	result, _ := store.Claim(context.Background(), key, requestHash, "token")
 
-	if status != idempo.StatusNew {
-		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusNew)
+	if result.Status != idempo.StatusNew {
+		t.Errorf("Status returned = %s, requested %s", result.Status, idempo.StatusNew)
 	}
 }
 
@@ -134,15 +134,15 @@ func TestClaimConcurrentSingleWinner(t *testing.T) {
 			defer wg.Done()
 			token := fmt.Sprintf("token-%d", i)
 			<-start
-			status, _, _, _, err := store.Claim(context.Background(), key, requestHash, token)
+			result, err := store.Claim(context.Background(), key, requestHash, token)
 
 			if err != nil {
 				t.Errorf("DB error: %s", err)
 			}
 
-			statuses[i] = status
+			statuses[i] = result.Status
 
-			if status == idempo.StatusNew {
+			if result.Status == idempo.StatusNew {
 				newCount.Add(1)
 			}
 		}(i)

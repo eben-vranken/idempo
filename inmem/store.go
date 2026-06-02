@@ -38,7 +38,7 @@ func (ims *InMemStore) Close() {
 	})
 }
 
-func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (idempo.ClaimStatus, int, []byte, []byte, error) {
+func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string, token string) (idempo.ClaimResult, error) {
 	ims.m.Lock()
 	defer ims.m.Unlock()
 
@@ -53,7 +53,7 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 			expiryTime: time.Now().Add(ims.lockTTL),
 		}
 
-		return idempo.StatusNew, 0, nil, nil, nil
+		return idempo.ClaimResult{Status: idempo.StatusNew}, nil
 	}
 
 	// Key exists but expired
@@ -65,25 +65,25 @@ func (ims *InMemStore) Claim(ctx context.Context, key string, requestHash string
 			expiryTime: time.Now().Add(ims.lockTTL),
 		}
 
-		return idempo.StatusNew, 0, nil, nil, nil
+		return idempo.ClaimResult{Status: idempo.StatusNew}, nil
 	}
 
 	// Key exists, state is pending
 	if val.state == idempo.StatusPending {
-		return val.state, val.responseCode, nil, nil, nil
+		return idempo.ClaimResult{Status: val.state, Code: val.responseCode}, nil
 	}
 
 	// Key exists, body is different
 	if val.state == idempo.StatusCompleted && val.bodyHash != requestHash {
-		return idempo.StatusConflict, http.StatusUnprocessableEntity, nil, val.responseBody, nil
+		return idempo.ClaimResult{Status: idempo.StatusConflict, Code: http.StatusUnprocessableEntity, Body: val.responseBody}, nil
 	}
 
 	// Key exists, state is completed
 	if val.state == idempo.StatusCompleted {
-		return val.state, val.responseCode, val.responseHeaders, val.responseBody, nil
+		return idempo.ClaimResult{Status: val.state, Code: val.responseCode, Headers: val.responseHeaders, Body: val.responseBody}, nil
 	}
 
-	return val.state, val.responseCode, nil, val.responseBody, nil
+	return idempo.ClaimResult{Status: val.state, Code: val.responseCode, Body: val.responseBody}, nil
 }
 
 func (ims *InMemStore) Complete(ctx context.Context, key string, token string, statusCode int, header []byte, body []byte) error {

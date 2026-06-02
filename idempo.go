@@ -25,7 +25,7 @@ const (
 )
 
 type Store interface {
-	Claim(ctx context.Context, key string, requestHash string, token string) (status ClaimStatus, savedCode int, savedHeaders []byte, savedBody []byte, err error)
+	Claim(ctx context.Context, key string, requestHash string, token string) (ClaimResult, error)
 
 	Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error
 
@@ -36,6 +36,13 @@ type Idempo struct {
 	store             Store
 	maxBodyBytes      int64
 	PersistentTimeout time.Duration
+}
+
+type ClaimResult struct {
+	Status  ClaimStatus
+	Code    int
+	Headers []byte
+	Body    []byte
 }
 
 func New(store Store, opts Options) *Idempo {
@@ -180,7 +187,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		bodyHash := hex.EncodeToString(sum)
 
 		token := uuid.NewString()
-		status, savedCode, savedHeaders, savedBody, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
+		result, err := m.store.Claim(r.Context(), idemKey, bodyHash, token)
 
 		if err != nil {
 			recorder.Header().Set("Content-Type", "application/problem+json")
@@ -197,21 +204,21 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		if status == StatusCompleted {
+		if result.Status == StatusCompleted {
 			var header http.Header
-			json.Unmarshal(savedHeaders, &header)
+			json.Unmarshal(result.Headers, &header)
 
 			for k, v := range header {
 				recorder.Header()[k] = v
 			}
 
 			recorder.Header().Set("Idempotency-Replayed", "true")
-			recorder.WriteHeader(savedCode)
-			recorder.Write(savedBody)
+			recorder.WriteHeader(result.Code)
+			recorder.Write(result.Body)
 			return
 		}
 
-		if status == StatusPending {
+		if result.Status == StatusPending {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusConflict)
 
@@ -225,7 +232,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		if status == StatusConflict {
+		if result.Status == StatusConflict {
 			recorder.Header().Set("Content-Type", "application/problem+json")
 			recorder.WriteHeader(http.StatusUnprocessableEntity)
 

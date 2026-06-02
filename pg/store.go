@@ -44,7 +44,7 @@ type Entry struct {
 	expiryTime      time.Time
 }
 
-func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (idempo.ClaimStatus, int, []byte, []byte, error) {
+func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string, token string) (idempo.ClaimResult, error) {
 	var state string
 	row := pgs.pool.QueryRow(ctx, `INSERT INTO pgStore (
 		idempoKey,
@@ -70,21 +70,21 @@ func (pgs *PostgresStore) Claim(ctx context.Context, key string, bodyHash string
 		err := row.Scan(&entry.state, &entry.bodyHash, &entry.responseCode, &entry.responseHeaders, &entry.responseBody, &entry.expiryTime)
 
 		if err != nil {
-			return "", 0, nil, nil, fmt.Errorf("pg claim select: %w", err)
+			return idempo.ClaimResult{}, fmt.Errorf("pg claim select: %w", err)
 		} else if entry.state == string(idempo.StatusPending) {
-			return idempo.StatusPending, 0, nil, nil, nil
+			return idempo.ClaimResult{Status: idempo.StatusPending}, nil
 		} else if entry.state == string(idempo.StatusCompleted) && entry.bodyHash != nil && bodyHash == *entry.bodyHash {
-			return idempo.StatusCompleted, *entry.responseCode, entry.responseHeaders, entry.responseBody, nil
+			return idempo.ClaimResult{Status: idempo.StatusCompleted, Code: *entry.responseCode, Headers: entry.responseHeaders, Body: entry.responseBody}, nil
 		} else {
-			return idempo.StatusConflict, 0, nil, nil, nil
+			return idempo.ClaimResult{Status: idempo.StatusConflict}, nil
 		}
 	}
 
 	if err != nil {
-		return "", 0, nil, nil, fmt.Errorf("pg claim upsert: %w", err)
+		return idempo.ClaimResult{}, fmt.Errorf("pg claim upsert: %w", err)
 	}
 
-	return idempo.StatusNew, 0, nil, nil, nil
+	return idempo.ClaimResult{Status: idempo.StatusNew}, nil
 }
 
 func (pgs *PostgresStore) Complete(ctx context.Context, key string, token string, statusCode int, headers []byte, body []byte) error {

@@ -17,14 +17,14 @@ func TestClaimNewKey(t *testing.T) {
 
 	store := inmem.New(24*time.Hour, 5*time.Minute)
 
-	status, _, _, _, err := store.Claim(ctx, key, requestHash, "token")
+	result, err := store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
 	}
 
-	if status != idempo.StatusNew {
-		t.Errorf("Status returned = %s, requested %s", status, idempo.StatusNew)
+	if result.Status != idempo.StatusNew {
+		t.Errorf("Status returned = %s, requested %s", result.Status, idempo.StatusNew)
 	}
 }
 
@@ -49,16 +49,16 @@ func TestClaimReturnsPending(t *testing.T) {
 
 	store := inmem.New(24*time.Hour, 5*time.Minute)
 
-	_, _, _, _, _ = store.Claim(ctx, key, requestHash, "token")
+	_, _ = store.Claim(ctx, key, requestHash, "token")
 
-	status, _, _, _, err := store.Claim(ctx, key, requestHash, "token")
+	result, err := store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
 	}
 
-	if status != statusExpected {
-		t.Errorf("Status returned = %s, requested %s", status, statusExpected)
+	if result.Status != statusExpected {
+		t.Errorf("Status returned = %s, requested %s", result.Status, statusExpected)
 	}
 }
 
@@ -69,22 +69,22 @@ func TestReturnsCompleted(t *testing.T) {
 	statusExpected := idempo.StatusCompleted
 
 	store := inmem.New(24*time.Hour, 5*time.Minute)
-	status, _, _, _, _ := store.Claim(ctx, key, requestHash, "token")
+	_, _ = store.Claim(ctx, key, requestHash, "token")
 
 	headerBytes := []byte(`{"Content-Type":["text/plain"]}`)
 	err := store.Complete(ctx, key, "token", 200, headerBytes, []byte(""))
-	status, _, savedHeaders, _, _ := store.Claim(ctx, key, requestHash, "token")
+	result, _ := store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
 	}
 
-	if status != statusExpected {
-		t.Errorf("Status returned = %s, requested %s", status, statusExpected)
+	if result.Status != statusExpected {
+		t.Errorf("Status returned = %s, requested %s", result.Status, statusExpected)
 	}
 
-	if !bytes.Equal(savedHeaders, headerBytes) {
-		t.Errorf("Header returned = %s, requested %s", savedHeaders, headerBytes)
+	if !bytes.Equal(result.Headers, headerBytes) {
+		t.Errorf("Header returned = %s, requested %s", result.Headers, headerBytes)
 	}
 }
 
@@ -96,14 +96,14 @@ func TestClaimExpiredKeyIsNew(t *testing.T) {
 
 	store := inmem.New(-1*time.Hour, 5*time.Minute)
 
-	_, _, _, _, _ = store.Claim(ctx, key, requestHash, "token")
-	status, _, _, _, err := store.Claim(ctx, key, requestHash, "token")
+	_, _ = store.Claim(ctx, key, requestHash, "token")
+	result, err := store.Claim(ctx, key, requestHash, "token")
 
 	if err != nil {
 		t.Errorf("Error returned = %s, requested nil", err)
 	}
 
-	if status != statusExpected {
-		t.Errorf("Status returned = %s, requested %s", status, statusExpected)
+	if result.Status != statusExpected {
+		t.Errorf("Status returned = %s, requested %s", result.Status, statusExpected)
 	}
 }
