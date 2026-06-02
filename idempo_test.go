@@ -733,3 +733,34 @@ func TestHandlerHijackAbandonsClaim(t *testing.T) {
 		t.Error("expected no Complete after a hijack")
 	}
 }
+
+func TestHandlerOversizedResponseAbandonsClaim(t *testing.T) {
+	store := &fakeStore{claimResult: idempo.ClaimResult{Status: idempo.StatusNew}}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(bytes.Repeat([]byte("x"), 100))
+	})
+
+	handler := idempo.New(store, idempo.Options{MaxResponseBytes: 10}).Handler(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{}"))
+	req.Header.Set("Idempotency-Key", "019e705d-bb1a-7085-9c1b-58a6a14a1aeb")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !store.abandonCalled {
+		t.Error("expected the claim to be abandoned for an oversized response")
+	}
+
+	if store.completed {
+		t.Error("expected no Complete for an oversized response")
+	}
+
+	// The cap only limits what is buffered for caching; the client must still
+	// receive the full response.
+	if rec.Body.Len() != 100 {
+		t.Errorf("client body length = %d, expected %d", rec.Body.Len(), 100)
+	}
+}

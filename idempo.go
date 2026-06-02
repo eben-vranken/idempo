@@ -95,6 +95,7 @@ type Store interface {
 type Idempo struct {
 	store             Store
 	maxBodyBytes      int64
+	maxResponseBytes  int64
 	PersistentTimeout time.Duration
 	logger            slog.Logger
 }
@@ -124,9 +125,14 @@ func New(store Store, opts Options) *Idempo {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	if opts.MaxResponseBytes == 0 {
+		opts.MaxResponseBytes = defaultMaxResponseBytes
+	}
+
 	return &Idempo{
 		store:             store,
 		maxBodyBytes:      opts.MaxBodyBytes,
+		maxResponseBytes:  opts.MaxResponseBytes,
 		PersistentTimeout: opts.PersistentTimeout,
 		logger:            *opts.Logger,
 	}
@@ -134,11 +140,13 @@ func New(store Store, opts Options) *Idempo {
 
 type Options struct {
 	MaxBodyBytes      int64
+	MaxResponseBytes  int64
 	PersistentTimeout time.Duration
 	Logger            *slog.Logger
 }
 
 const defaultMaxBodyBytes = 1 << 20
+const defaultMaxResponseBytes = 1 << 20
 const defaultPersistentTImeout = time.Second * 10
 const maxKeyLen = 255
 
@@ -155,6 +163,8 @@ type responseRecorder struct {
 	header      http.Header
 	wroteHeader bool
 	hijacked    bool
+	maxBytes    int64
+	overflowed  bool
 }
 
 func (sr *responseRecorder) WriteHeader(code int) {
@@ -169,7 +179,17 @@ func (sr *responseRecorder) Write(body []byte) (int, error) {
 		sr.WriteHeader(http.StatusOK)
 	}
 
-	sr.body = append(sr.body, body...)
+	if !sr.overflowed {
+		if int64(len(sr.body)+len(body)) > sr.maxBytes {
+			// Too large to cache: drop the buffer and stop recording. The
+			// client still receives the full response via the Write below.
+			sr.overflowed = true
+			sr.body = nil
+		} else {
+			sr.body = append(sr.body, body...)
+		}
+	}
+
 	return sr.ResponseWriter.Write(body)
 }
 
@@ -235,6 +255,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 		recorder := &responseRecorder{
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
+			maxBytes:       m.maxResponseBytes,
 		}
 
 		if len(idemKey) > maxKeyLen {
@@ -314,7 +335,7 @@ func (m *Idempo) Handler(next http.Handler) http.Handler {
 
 		defer cancel()
 
-		if recorder.hijacked || recorder.statusCode >= 500 {
+		if recorder.hijacked || recorder.overflowed || recorder.statusCode >= 500 {
 			err = m.store.Abandon(persistCtx, idemKey, token)
 		} else {
 			headerBytes, marshalErr := json.Marshal(recorder.header)
