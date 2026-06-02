@@ -1,3 +1,4 @@
+// Package inmem provides an in-memory Store implementation for single-instance deployments and testing.
 package inmem
 
 import (

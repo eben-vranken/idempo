@@ -1,3 +1,4 @@
+// Package redis provides a Redis-backed Store implementation for distributed deployments.
 package redis
 
 import (

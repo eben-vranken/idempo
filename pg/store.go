@@ -1,3 +1,4 @@
+// Package pg provides a PostgreSQL-backed Store implementation for durable, ACID-compliant storage.
 package pg
 
 import (
